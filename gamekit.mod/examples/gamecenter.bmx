@@ -3,18 +3,26 @@ SuperStrict
 Framework Max2D.SDL3RenderMax2D
 Import Apple.GameKit
 Import BRL.PolledInput
+Import BRL.StandardIO
 
 Const SCREEN_WIDTH:Int = 800
 Const SCREEN_HEIGHT:Int = 450
 
 Global statusText:String = "Starting Game Center..."
 Global detailText:String = ""
+Global errorText:String = ""
 Global metadataRequested:Int
+
+Function ShowError(context:String, error:TGameCenterError)
+	statusText = context
+	errorText = error.domain + " (" + error.code + "): " + error.message
+	Print statusText + ": " + errorText
+End Function
 
 Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 	Method OnGameCenterAuthenticationChanged(authenticated:Int, player:TGameCenterPlayer, error:TGameCenterError)
 		If error Then
-			statusText = "Authentication: " + error.message
+			ShowError("Authentication failed", error)
 		Else If authenticated Then
 			statusText = "Authenticated as " + player.displayName
 			detailText = "Player ID: " + player.gamePlayerId
@@ -30,12 +38,12 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 	End Method
 
 	Method OnGameCenterAchievementReported(requestId:Int, identifier:String, error:TGameCenterError)
-		If error Then statusText = error.message Else statusText = "Achievement reported: " + identifier
+		If error Then ShowError("Achievement report failed", error) Else statusText = "Achievement reported: " + identifier
 	End Method
 
 	Method OnGameCenterAchievementsLoaded(requestId:Int, result:TGameCenterAchievementResult, error:TGameCenterError)
 		If error Then
-			statusText = error.message
+			ShowError("Achievement load failed", error)
 		Else
 			Local count:Int
 			If result Then count = result.achievements.length
@@ -44,16 +52,16 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 	End Method
 
 	Method OnGameCenterAchievementsReset(requestId:Int, error:TGameCenterError)
-		If error Then statusText = error.message Else statusText = "Achievements reset"
+		If error Then ShowError("Achievement reset failed", error) Else statusText = "Achievements reset"
 	End Method
 
 	Method OnGameCenterScoreSubmitted(requestId:Int, leaderboardIdentifier:String, score:Long, error:TGameCenterError)
-		If error Then statusText = error.message Else statusText = "Score submitted: " + score
+		If error Then ShowError("Score submission failed", error) Else statusText = "Score submitted: " + score
 	End Method
 
 	Method OnGameCenterLeaderboardLoaded(requestId:Int, leaderboard:TGameCenterLeaderboardResult, error:TGameCenterError)
 		If error Then
-			statusText = error.message
+			ShowError("Leaderboard load failed", error)
 		Else If leaderboard Then
 			statusText = "Loaded " + leaderboard.entries.length + " leaderboard entries"
 		End If
@@ -65,7 +73,7 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 
 	Method OnGameCenterAchievementDescriptionsLoaded(requestId:Int, result:TGameCenterAchievementDescriptionResult, error:TGameCenterError)
 		If error Then
-			statusText = "Achievement metadata: " + error.message
+			ShowError("Achievement metadata failed", error)
 		Else
 			Local count:Int
 			If result Then count = result.descriptions.length
@@ -79,7 +87,7 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 
 	Method OnGameCenterLeaderboardsLoaded(requestId:Int, result:TGameCenterLeaderboardInfoResult, error:TGameCenterError)
 		If error Then
-			statusText = "Leaderboard metadata: " + error.message
+			ShowError("Leaderboard metadata failed", error)
 		Else
 			Local count:Int
 			If result Then count = result.leaderboards.length
@@ -89,7 +97,7 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 
 	Method OnGameCenterLeaderboardSetsLoaded(requestId:Int, result:TGameCenterLeaderboardSetResult, error:TGameCenterError)
 		If error Then
-			statusText = "Leaderboard sets: " + error.message
+			ShowError("Leaderboard sets failed", error)
 		Else
 			Local count:Int
 			If result Then count = result.sets.length
@@ -99,7 +107,7 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 
 	Method OnGameCenterResourceImageLoaded(requestId:Int, kind:EGameCenterResourceKind, identifier:String, pngData:Byte[], error:TGameCenterError)
 		If error Then
-			statusText = "Artwork: " + error.message
+			ShowError("Artwork load failed", error)
 		Else
 			statusText = "Loaded " + pngData.length + " bytes of PNG artwork"
 		End If
@@ -120,6 +128,7 @@ While Not AppTerminate()
 	DrawText "Apple.GameKit", 60, 60
 	DrawText statusText, 60, 115
 	DrawText detailText, 60, 145
+	DrawText errorText, 60, 175
 	SetColor 55, 155, 235
 	DrawRect 60, 210, 300, 60
 	SetColor 255, 255, 255
