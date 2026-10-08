@@ -77,6 +77,7 @@ Enum EGameCenterResourceKind
 	Achievement
 	Leaderboard
 	LeaderboardSet
+	Challenge
 End Enum
 
 Rem
@@ -96,6 +97,16 @@ End Rem
 Enum EGameCenterPhotoSize
 	Small
 	Normal
+End Enum
+
+Rem
+bbdoc: The lifecycle state of a Game Center game activity.
+End Rem
+Enum EGameCenterActivityState
+	Initialized
+	Active
+	Paused
+	Ended = 4
 End Enum
 
 Rem
@@ -329,6 +340,100 @@ Type TGameCenterLeaderboardSetResult
 End Type
 
 Rem
+bbdoc: A calendar duration offered for a Game Center challenge.
+about: Game Center may adjust the actual duration to account for factors such as the participating players' time zones. Apple currently configures challenge choices primarily as days or weeks; the remaining fields preserve any future calendar components returned by GameKit.
+End Rem
+Type TGameCenterChallengeDuration
+	Field years:Int
+	Field months:Int
+	Field weeks:Int
+	Field days:Int
+	Field hours:Int
+	Field minutes:Int
+	Field seconds:Int
+
+	Function _Create:TGameCenterChallengeDuration(years:Int, months:Int, weeks:Int, days:Int, hours:Int, minutes:Int, seconds:Int)
+		Local duration:TGameCenterChallengeDuration = New TGameCenterChallengeDuration
+		duration.years = years
+		duration.months = months
+		duration.weeks = weeks
+		duration.days = days
+		duration.hours = hours
+		duration.minutes = minutes
+		duration.seconds = seconds
+		Return duration
+	End Function
+End Type
+
+Rem
+bbdoc: Localized metadata for a developer-defined Game Center challenge.
+about: Developer-defined challenges require iOS 26 or macOS 26. Submit progress to leaderboardIdentifier with #TGameCenter.SubmitScore; Game Center applies that score to associated challenges automatically.
+End Rem
+Type TGameCenterChallengeDefinition
+	Field identifier:String
+	Field groupIdentifier:String
+	Field title:String
+	Field details:String
+	Field durationOptions:TGameCenterChallengeDuration[]
+	Field repeatable:Int
+	Field leaderboardIdentifier:String
+	Field releaseState:EGameCenterReleaseState
+
+	Function _Create:TGameCenterChallengeDefinition(identifier:String, groupIdentifier:String, title:String, details:String, durationCount:Int, repeatable:Int, leaderboardIdentifier:String, releaseState:EGameCenterReleaseState)
+		Local definition:TGameCenterChallengeDefinition = New TGameCenterChallengeDefinition
+		definition.identifier = identifier
+		definition.groupIdentifier = groupIdentifier
+		definition.title = title
+		definition.details = details
+		definition.durationOptions = New TGameCenterChallengeDuration[durationCount]
+		definition.repeatable = repeatable
+		definition.leaderboardIdentifier = leaderboardIdentifier
+		definition.releaseState = releaseState
+		Return definition
+	End Function
+End Type
+
+Rem
+bbdoc: Developer-defined challenges returned by a metadata request.
+End Rem
+Type TGameCenterChallengeDefinitionResult
+	Field definitions:TGameCenterChallengeDefinition[]
+End Type
+
+Rem
+bbdoc: A Game Center activity selected through a system notification or deep link.
+about: Use definitionIdentifier and properties to route the player to the correct game content. Party fields are populated only for activities configured to support party codes.
+End Rem
+Type TGameCenterActivity
+	Field identifier:String
+	Field definitionIdentifier:String
+	Field properties:TMap = New TMap
+	Field partyCode:String
+	Field partyUrl:String
+	Field state:EGameCenterActivityState
+	Field creationTime:Double
+	Field startTime:Double
+	Field lastResumeTime:Double
+	Field endTime:Double
+	Field duration:Double
+
+	Function _Create:TGameCenterActivity(identifier:String, definitionIdentifier:String, partyCode:String, partyUrl:String, state:EGameCenterActivityState, creationTime:Double, startTime:Double, lastResumeTime:Double, endTime:Double, duration:Double)
+		Local activity:TGameCenterActivity = New TGameCenterActivity
+		activity.identifier = identifier
+		activity.definitionIdentifier = definitionIdentifier
+		activity.partyCode = partyCode
+		activity.partyUrl = partyUrl
+		activity.state = state
+		activity.creationTime = creationTime
+		activity.startTime = startTime
+		activity.lastResumeTime = lastResumeTime
+		activity.endTime = endTime
+		activity.duration = duration
+		Return activity
+	End Function
+End Type
+
+Rem
 bbdoc: One ranked entry returned by a Game Center leaderboard.
 End Rem
 Type TGameCenterLeaderboardEntry
@@ -396,6 +501,25 @@ Interface IGameCenterMetadataListener
 End Interface
 
 Rem
+bbdoc: Optional listener for developer-defined Game Center challenges.
+about: Challenges require iOS 26 or macOS 26 and must be configured in App Store Connect. Scores are reported through #TGameCenter.SubmitScore using the challenge's associated leaderboard.
+End Rem
+Interface IGameCenterChallengeListener
+	Method OnGameCenterChallengeDefinitionsLoaded(requestId:Int, result:TGameCenterChallengeDefinitionResult, error:TGameCenterError)
+	Method OnGameCenterChallengeActiveStatusLoaded(requestId:Int, identifier:String, hasActiveChallenges:Int, error:TGameCenterError)
+	Method OnGameCenterChallengeViewDismissed(requestId:Int, identifier:String, error:TGameCenterError)
+End Interface
+
+Rem
+bbdoc: Optional listener for Game Center activity deep links.
+about: Return #True from #OnGameCenterWantsToPlayActivity after accepting and routing the activity, or #False when the application cannot handle its definition identifier. Call #TGameCenter.Start early during launch so cold-start activity events can be delivered.
+End Rem
+Interface IGameCenterActivityListener
+	Method OnGameCenterPendingActivityChecked(requestId:Int, hasPendingActivity:Int, error:TGameCenterError)
+	Method OnGameCenterWantsToPlayActivity:Int(player:TGameCenterPlayer, activity:TGameCenterActivity)
+End Interface
+
+Rem
 bbdoc: Optional listener for Game Center friends and player photos.
 about: Friend access requires an NSGKFriendListUsageDescription entry in the application's Info.plist. Calling #TGameCenter.LoadFriends can display Apple's permission prompt.
 End Rem
@@ -442,6 +566,10 @@ Type TLeaderboardSetLoad
 	Field index:Int
 End Type
 
+Type TChallengeDefinitionLoad
+	Field values:TGameCenterChallengeDefinition[]
+End Type
+
 Type TLeaderboardLoad
 	Field result:TGameCenterLeaderboardResult
 	Field values:TGameCenterLeaderboardEntry[]
@@ -474,6 +602,9 @@ Type TGameCenter
 	Field achievementDescriptionLoads:TMap = New TMap
 	Field leaderboardInfoLoads:TMap = New TMap
 	Field leaderboardSetLoads:TMap = New TMap
+	Field challengeDefinitionLoads:TMap = New TMap
+	Field incomingActivity:TGameCenterActivity
+	Field incomingActivityPlayer:TGameCenterPlayer
 	Field playerLoads:TMap = New TMap
 	Field savedGameLoads:TMap = New TMap
 	Field savedGames:TMap = New TMap
@@ -512,6 +643,9 @@ Type TGameCenter
 		achievementDescriptionLoads.Clear()
 		leaderboardInfoLoads.Clear()
 		leaderboardSetLoads.Clear()
+		challengeDefinitionLoads.Clear()
+		incomingActivity = Null
+		incomingActivityPlayer = Null
 		playerLoads.Clear()
 		savedGameLoads.Clear()
 		savedGames.Clear()
@@ -529,6 +663,14 @@ Type TGameCenter
 	End Rem
 	Method IsAuthenticated:Int()
 		Return bmx_gamekit_is_authenticated()
+	End Method
+
+	Rem
+	bbdoc: Returns #True when developer-defined challenges are available on this OS version.
+	about: The modern challenge model requires iOS 26 or macOS 26.
+	End Rem
+	Method AreChallengesAvailable:Int()
+		Return bmx_gamekit_are_challenges_available()
 	End Method
 
 	Rem
@@ -665,7 +807,62 @@ Type TGameCenter
 	End Method
 
 	Rem
-	bbdoc: Loads PNG artwork for an achievement, leaderboard, or leaderboard set.
+	bbdoc: Loads every non-archived developer-defined challenge configured for the game.
+	about: Requires iOS 26 or macOS 26. Challenge scores are submitted through the associated leaderboard using #SubmitScore.
+	returns: A request identifier supplied to #IGameCenterChallengeListener.
+	End Rem
+	Method LoadChallengeDefinitions:Int()
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_load_challenge_definitions(requestId)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Checks whether a challenge definition currently has active challenges associated with it.
+	about: Requires iOS 26 or macOS 26. The identifier must belong to a non-archived challenge configured for this game.
+	returns: A request identifier supplied to #IGameCenterChallengeListener.
+	End Rem
+	Method LoadChallengeActiveStatus:Int(identifier:String)
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_load_challenge_active_status(requestId, identifier)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Opens Apple's system interface for browsing and creating challenges.
+	about: Game Center handles challenge selection, friend invitations and confirmation. Requires iOS 26 or macOS 26.
+	returns: A request identifier supplied to #IGameCenterChallengeListener when the interface closes.
+	End Rem
+	Method ShowChallenges:Int()
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_show_challenges(requestId, "")
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Opens Apple's system interface to create a challenge from one configured definition.
+	about: Game Center handles friend invitations and confirmation. Requires iOS 26 or macOS 26.
+	returns: A request identifier supplied to #IGameCenterChallengeListener when the interface closes.
+	End Rem
+	Method CreateChallenge:Int(identifier:String)
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_show_challenges(requestId, identifier)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Checks whether Game Center has an activity waiting for this game to handle.
+	about: Call #Start early during application launch and use this check to prepare for a possible activity callback. The check does not consume or return the activity.
+	returns: A request identifier supplied to #IGameCenterActivityListener.
+	End Rem
+	Method CheckPendingGameActivity:Int()
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_check_pending_activity(requestId)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Loads PNG artwork for an achievement, leaderboard, leaderboard set, or challenge.
 	returns: A request identifier supplied to #IGameCenterMetadataListener.
 	End Rem
 	Method LoadResourceImage:Int(kind:EGameCenterResourceKind, identifier:String)
@@ -962,6 +1159,75 @@ Type TGameCenter
 		If metadataListener Then metadataListener.OnGameCenterLeaderboardSetsLoaded(requestId, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
 	End Function
 
+	Function _OnChallengeDefinitionLoadBegin(service:TGameCenter, requestId:Int, count:Int) { nomangle }
+		Local load:TChallengeDefinitionLoad = New TChallengeDefinitionLoad
+		load.values = New TGameCenterChallengeDefinition[count]
+		service.challengeDefinitionLoads.Insert(String.FromInt(requestId), load)
+	End Function
+
+	Function _OnChallengeDefinitionLoaded(service:TGameCenter, requestId:Int, index:Int, identifier:String, groupIdentifier:String, title:String, details:String, durationCount:Int, repeatable:Int, leaderboardIdentifier:String, releaseState:EGameCenterReleaseState) { nomangle }
+		Local load:TChallengeDefinitionLoad = TChallengeDefinitionLoad(service.challengeDefinitionLoads.ValueForKey(String.FromInt(requestId)))
+		If load And index >= 0 And index < load.values.length Then
+			load.values[index] = TGameCenterChallengeDefinition._Create(identifier, groupIdentifier, title, details, durationCount, repeatable, leaderboardIdentifier, releaseState)
+		End If
+	End Function
+
+	Function _OnChallengeDurationLoaded(service:TGameCenter, requestId:Int, definitionIndex:Int, durationIndex:Int, years:Int, months:Int, weeks:Int, days:Int, hours:Int, minutes:Int, seconds:Int) { nomangle }
+		Local load:TChallengeDefinitionLoad = TChallengeDefinitionLoad(service.challengeDefinitionLoads.ValueForKey(String.FromInt(requestId)))
+		If Not load Or definitionIndex < 0 Or definitionIndex >= load.values.length Then Return
+		Local definition:TGameCenterChallengeDefinition = load.values[definitionIndex]
+		If definition And durationIndex >= 0 And durationIndex < definition.durationOptions.length Then
+			definition.durationOptions[durationIndex] = TGameCenterChallengeDuration._Create(years, months, weeks, days, hours, minutes, seconds)
+		End If
+	End Function
+
+	Function _OnChallengeDefinitionLoadComplete(service:TGameCenter, requestId:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local key:String = String.FromInt(requestId)
+		Local load:TChallengeDefinitionLoad = TChallengeDefinitionLoad(service.challengeDefinitionLoads.ValueForKey(key))
+		service.challengeDefinitionLoads.Remove(key)
+		Local result:TGameCenterChallengeDefinitionResult
+		If load Then
+			result = New TGameCenterChallengeDefinitionResult
+			result.definitions = load.values
+		End If
+		Local challengeListener:IGameCenterChallengeListener = IGameCenterChallengeListener(service.listener)
+		If challengeListener Then challengeListener.OnGameCenterChallengeDefinitionsLoaded(requestId, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnChallengeActiveStatusLoaded(service:TGameCenter, requestId:Int, identifier:String, hasActiveChallenges:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local challengeListener:IGameCenterChallengeListener = IGameCenterChallengeListener(service.listener)
+		If challengeListener Then challengeListener.OnGameCenterChallengeActiveStatusLoaded(requestId, identifier, hasActiveChallenges, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnChallengeViewDismissed(service:TGameCenter, requestId:Int, identifier:String, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local challengeListener:IGameCenterChallengeListener = IGameCenterChallengeListener(service.listener)
+		If challengeListener Then challengeListener.OnGameCenterChallengeViewDismissed(requestId, identifier, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnPendingGameActivityChecked(service:TGameCenter, requestId:Int, hasPendingActivity:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local activityListener:IGameCenterActivityListener = IGameCenterActivityListener(service.listener)
+		If activityListener Then activityListener.OnGameCenterPendingActivityChecked(requestId, hasPendingActivity, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnGameActivityBegin(service:TGameCenter, gamePlayerId:String, teamPlayerId:String, alias:String, displayName:String, identifier:String, definitionIdentifier:String, partyCode:String, partyUrl:String, state:EGameCenterActivityState, creationTime:Double, startTime:Double, lastResumeTime:Double, endTime:Double, duration:Double) { nomangle }
+		service.incomingActivityPlayer = TGameCenterPlayer._Create(gamePlayerId, teamPlayerId, alias, displayName)
+		service.incomingActivity = TGameCenterActivity._Create(identifier, definitionIdentifier, partyCode, partyUrl, state, creationTime, startTime, lastResumeTime, endTime, duration)
+	End Function
+
+	Function _OnGameActivityProperty(service:TGameCenter, key:String, value:String) { nomangle }
+		If service.incomingActivity Then service.incomingActivity.properties.Insert(key, value)
+	End Function
+
+	Function _OnGameActivityReady:Int(service:TGameCenter) { nomangle }
+		Local activity:TGameCenterActivity = service.incomingActivity
+		Local player:TGameCenterPlayer = service.incomingActivityPlayer
+		service.incomingActivity = Null
+		service.incomingActivityPlayer = Null
+		Local activityListener:IGameCenterActivityListener = IGameCenterActivityListener(service.listener)
+		If activityListener And activity Then Return activityListener.OnGameCenterWantsToPlayActivity(player, activity)
+		Return False
+	End Function
+
 	Function _OnResourceImageLoaded(service:TGameCenter, requestId:Int, kind:EGameCenterResourceKind, identifier:String, pngData:Byte[], errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
 		Local metadataListener:IGameCenterMetadataListener = IGameCenterMetadataListener(service.listener)
 		If metadataListener Then metadataListener.OnGameCenterResourceImageLoaded(requestId, kind, identifier, pngData, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
@@ -1087,6 +1353,7 @@ Extern
 	Function bmx_gamekit_stop()
 	Function bmx_gamekit_is_available:Int()
 	Function bmx_gamekit_is_authenticated:Int()
+	Function bmx_gamekit_are_challenges_available:Int()
 	Function bmx_gamekit_fetch_identity_verification(requestId:Int)
 	Function bmx_gamekit_set_access_point_active(active:Int, location:EGameCenterAccessPointLocation)
 	Function bmx_gamekit_is_access_point_active:Int()
@@ -1101,6 +1368,10 @@ Extern
 	Function bmx_gamekit_load_leaderboard(requestId:Int, leaderboardIdentifier:String, playerScope:EGameCenterPlayerScope, timeScope:EGameCenterTimeScope, startRank:Int, count:Int)
 	Function bmx_gamekit_load_leaderboards(requestId:Int, setIdentifier:String)
 	Function bmx_gamekit_load_leaderboard_sets(requestId:Int)
+	Function bmx_gamekit_load_challenge_definitions(requestId:Int)
+	Function bmx_gamekit_load_challenge_active_status(requestId:Int, identifier:String)
+	Function bmx_gamekit_show_challenges(requestId:Int, identifier:String)
+	Function bmx_gamekit_check_pending_activity(requestId:Int)
 	Function bmx_gamekit_load_resource_image(requestId:Int, kind:EGameCenterResourceKind, identifier:String)
 	Function bmx_gamekit_load_friends_authorization(requestId:Int)
 	Function bmx_gamekit_load_friends(requestId:Int)
