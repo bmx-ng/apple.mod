@@ -28,8 +28,8 @@ duration choices, repeatability, associated leaderboard and release state for
 each non-archived definition. `LoadChallengeActiveStatus()` reports whether a
 particular definition currently has active challenges associated with it.
 Implement `IGameCenterChallengeListener` to receive both results. Challenge
-artwork is available through `LoadResourceImage()` with
-`EGameCenterResourceKind.Challenge`.
+When configured, challenge artwork is available through `LoadResourceImage()`
+with `EGameCenterResourceKind.Challenge`; no artwork is also a valid result.
 
 The game does not submit challenge progress separately. Call `SubmitScore()`
 for the definition's `leaderboardIdentifier`; Game Center automatically applies
@@ -39,9 +39,11 @@ returned duration components as configured choices rather than exact elapsed
 seconds.
 
 Challenge invitations and discovery are managed by the Games app and Game
-Center. `ShowChallenges()` opens Apple's challenge browser, while
-`CreateChallenge(identifier)` opens the system creation and friend-invitation
-interface for one definition. Both report dismissal through
+Center. `ShowChallenges()` opens Apple's browser for challenge instances that
+currently involve the local player; an empty browser is expected until a
+challenge has been created or received. `CreateChallenge(identifier)` opens
+the system creation and friend-invitation interface for one definition. Both
+report dismissal through
 `OnGameCenterChallengeViewDismissed()`; the game never needs to implement its
 own friend picker or challenge notification service.
 

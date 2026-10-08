@@ -110,7 +110,12 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 
 	Method OnGameCenterResourceImageLoaded(requestId:Int, kind:EGameCenterResourceKind, identifier:String, pngData:Byte[], error:TGameCenterError)
 		If error Then
-			ShowError("Artwork load failed", error)
+			If kind = EGameCenterResourceKind.Challenge Then
+				statusText = "Challenge artwork unavailable (optional)"
+				Print "Challenge artwork unavailable for " + identifier + ": " + error.message
+			Else
+				ShowError("Artwork load failed", error)
+			End If
 		Else
 			statusText = "Loaded " + pngData.length + " bytes of PNG artwork"
 		End If
@@ -227,7 +232,7 @@ While Not AppTerminate()
 	SetColor 255, 255, 255
 	DrawText "Open Game Center", 90, 270
 	DrawText "Fetch identity payload", 430, 270
-	DrawText "Browse challenges", 90, 350
+	DrawText "Browse active challenges", 90, 350
 	DrawText "Create first challenge", 430, 350
 
 	If MouseHit(1) Then
