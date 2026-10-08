@@ -3,7 +3,8 @@
 `Apple.GameKit` provides BlitzMax access to Apple's Game Center service on iOS
 and macOS. The API covers local-player authentication, server identity
 verification, players and friends, achievements, leaderboards, iCloud saved
-games, resource artwork and the Game Center access point.
+games, developer-defined challenges, resource artwork and the Game Center
+access point.
 
 The module contains no public API on non-Apple targets. This allows shared
 projects to import it conditionally without compiling Apple-specific types or
@@ -12,6 +13,35 @@ native stubs into other platform builds.
 The modern access-point and leaderboard APIs require iOS 14 or macOS 11. The
 module can still be imported on older systems, but `IsAvailable()` returns
 false and modern operations report an error.
+
+## Challenges
+
+The module uses Apple's developer-defined challenge model introduced in iOS 26
+and macOS 26. The legacy `GKChallenge`, `GKScoreChallenge` and
+`GKAchievementChallenge` APIs are deprecated and are intentionally not wrapped.
+Use `AreChallengesAvailable()` before presenting challenge-specific controls on
+older systems.
+
+Create challenges in App Store Connect and associate each one with a
+leaderboard. `LoadChallengeDefinitions()` returns the localized title, details,
+duration choices, repeatability, associated leaderboard and release state for
+each non-archived definition. `LoadChallengeActiveStatus()` reports whether a
+particular definition currently has active challenges associated with it.
+Implement `IGameCenterChallengeListener` to receive both results. Challenge
+artwork is available through `LoadResourceImage()` with
+`EGameCenterResourceKind.Challenge`.
+
+The game does not submit challenge progress separately. Call `SubmitScore()`
+for the definition's `leaderboardIdentifier`; Game Center automatically applies
+that leaderboard score to associated challenges. Apple can adjust the actual
+challenge duration for factors such as the players' time zones, so treat the
+returned duration components as configured choices rather than exact elapsed
+seconds.
+
+Challenge invitations and discovery are managed by the Games app and Game
+Center. Routing a player directly to relevant game content after they select a
+challenge requires GameKit activity/deep-link handling, which is a separate
+integration from challenge metadata and score reporting.
 
 ## Application setup
 

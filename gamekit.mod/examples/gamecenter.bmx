@@ -19,7 +19,7 @@ Function ShowError(context:String, error:TGameCenterError)
 	Print statusText + ": " + errorText
 End Function
 
-Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGameCenterPlayerListener, IGameCenterIdentityListener
+Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGameCenterPlayerListener, IGameCenterIdentityListener, IGameCenterChallengeListener
 	Method OnGameCenterAuthenticationChanged(authenticated:Int, player:TGameCenterPlayer, error:TGameCenterError)
 		If error Then
 			ShowError("Authentication failed", error)
@@ -32,6 +32,7 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 				TGameCenter.Shared().LoadAchievementDescriptions()
 				TGameCenter.Shared().LoadLeaderboards()
 				TGameCenter.Shared().LoadLeaderboardSets()
+				If TGameCenter.Shared().AreChallengesAvailable() Then TGameCenter.Shared().LoadChallengeDefinitions()
 			End If
 		Else
 			statusText = "Game Center is not authenticated"
@@ -144,6 +145,30 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 			detailText = verification.signature.length + " signature bytes; timestamp " + verification.timestamp
 			Print "Identity public key: " + verification.publicKeyUrl
 			Print "Identity bundle: " + verification.bundleIdentifier
+		End If
+	End Method
+
+	Method OnGameCenterChallengeDefinitionsLoaded(requestId:Int, result:TGameCenterChallengeDefinitionResult, error:TGameCenterError)
+		If error Then
+			ShowError("Challenge metadata failed", error)
+		Else
+			Local count:Int
+			If result Then count = result.definitions.length
+			statusText = "Loaded " + count + " challenge definitions"
+			If count Then
+				Local definition:TGameCenterChallengeDefinition = result.definitions[0]
+				detailText = definition.title + " (" + definition.leaderboardIdentifier + ")"
+				TGameCenter.Shared().LoadChallengeActiveStatus(definition.identifier)
+				TGameCenter.Shared().LoadResourceImage(EGameCenterResourceKind.Challenge, definition.identifier)
+			End If
+		End If
+	End Method
+
+	Method OnGameCenterChallengeActiveStatusLoaded(requestId:Int, identifier:String, hasActiveChallenges:Int, error:TGameCenterError)
+		If error Then
+			ShowError("Challenge status failed", error)
+		Else
+			Print "Challenge " + identifier + " has active challenges: " + hasActiveChallenges
 		End If
 	End Method
 End Type
