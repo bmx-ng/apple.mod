@@ -54,6 +54,13 @@ a big-endian unsigned 64-bit integer, and salt. Apple Arcade games use the game
 player ID instead. Trust only the fields covered by the successful signature;
 aliases and display names are player-controlled presentation data.
 
+The [`server-reference`](server-reference/README.md) directory contains a small
+Node.js implementation of the complete verification flow, including bundle-ID
+allow-listing, timestamp and replay checks, safe certificate retrieval,
+certificate-chain validation, signed-buffer construction and RSA-SHA256
+verification. It is designed to be incorporated into an application's trusted
+server rather than shipped in the game client.
+
 Implement `IGameCenterListener` for authentication and gameplay operations.
 An object can additionally implement `IGameCenterMetadataListener` to receive
 achievement descriptions, leaderboard metadata, leaderboard sets and PNG
