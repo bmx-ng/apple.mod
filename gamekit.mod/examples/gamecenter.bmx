@@ -9,14 +9,21 @@ Const SCREEN_HEIGHT:Int = 450
 
 Global statusText:String = "Starting Game Center..."
 Global detailText:String = ""
+Global metadataRequested:Int
 
-Type TListener Implements IGameCenterListener
+Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 	Method OnGameCenterAuthenticationChanged(authenticated:Int, player:TGameCenterPlayer, error:TGameCenterError)
 		If error Then
 			statusText = "Authentication: " + error.message
 		Else If authenticated Then
 			statusText = "Authenticated as " + player.displayName
 			detailText = "Player ID: " + player.gamePlayerId
+			If Not metadataRequested Then
+				metadataRequested = True
+				TGameCenter.Shared().LoadAchievementDescriptions()
+				TGameCenter.Shared().LoadLeaderboards()
+				TGameCenter.Shared().LoadLeaderboardSets()
+			End If
 		Else
 			statusText = "Game Center is not authenticated"
 		End If
@@ -54,6 +61,48 @@ Type TListener Implements IGameCenterListener
 
 	Method OnGameCenterViewDismissed(view:EGameCenterView)
 		statusText = "Game Center closed"
+	End Method
+
+	Method OnGameCenterAchievementDescriptionsLoaded(requestId:Int, result:TGameCenterAchievementDescriptionResult, error:TGameCenterError)
+		If error Then
+			statusText = "Achievement metadata: " + error.message
+		Else
+			Local count:Int
+			If result Then count = result.descriptions.length
+			statusText = "Loaded " + count + " achievement descriptions"
+			If count Then
+				detailText = result.descriptions[0].title
+				TGameCenter.Shared().LoadResourceImage(EGameCenterResourceKind.Achievement, result.descriptions[0].identifier)
+			End If
+		End If
+	End Method
+
+	Method OnGameCenterLeaderboardsLoaded(requestId:Int, result:TGameCenterLeaderboardInfoResult, error:TGameCenterError)
+		If error Then
+			statusText = "Leaderboard metadata: " + error.message
+		Else
+			Local count:Int
+			If result Then count = result.leaderboards.length
+			statusText = "Loaded " + count + " leaderboards"
+		End If
+	End Method
+
+	Method OnGameCenterLeaderboardSetsLoaded(requestId:Int, result:TGameCenterLeaderboardSetResult, error:TGameCenterError)
+		If error Then
+			statusText = "Leaderboard sets: " + error.message
+		Else
+			Local count:Int
+			If result Then count = result.sets.length
+			statusText = "Loaded " + count + " leaderboard sets"
+		End If
+	End Method
+
+	Method OnGameCenterResourceImageLoaded(requestId:Int, kind:EGameCenterResourceKind, identifier:String, pngData:Byte[], error:TGameCenterError)
+		If error Then
+			statusText = "Artwork: " + error.message
+		Else
+			statusText = "Loaded " + pngData.length + " bytes of PNG artwork"
+		End If
 	End Method
 End Type
 

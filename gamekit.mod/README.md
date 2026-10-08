@@ -1,8 +1,9 @@
 # Apple.GameKit
 
 `Apple.GameKit` provides BlitzMax access to Apple's Game Center service on iOS
-and macOS. The initial API covers local-player authentication, achievements,
-leaderboards and the Game Center access point.
+and macOS. The API covers local-player authentication, achievements,
+leaderboards, leaderboard sets, resource artwork and the Game Center access
+point.
 
 The module contains no public API on non-Apple targets. This allows shared
 projects to import it conditionally without compiling Apple-specific types or
@@ -30,6 +31,24 @@ a rebuild, so step 3 currently needs to be repeated after regenerating it.
 Call `TGameCenter.Shared().Start(listener)` near application startup. GameKit
 may invoke the authentication callback more than once as the player's account
 state changes.
+
+Implement `IGameCenterListener` for authentication and gameplay operations.
+An object can additionally implement `IGameCenterMetadataListener` to receive
+achievement descriptions, leaderboard metadata, leaderboard sets and PNG
+artwork. Keeping the metadata listener optional allows existing listeners to
+continue using only the core API.
+
+Use `LoadAchievementDescriptions()` to retrieve localized achievement titles,
+descriptions, point values and visibility. `LoadLeaderboards()` returns both
+classic and recurring leaderboards; pass a leaderboard-set identifier to
+restrict the result to that set. `LoadLeaderboardSets()` discovers the sets
+configured for the game. Artwork for any of these resources is returned as PNG
+bytes by `LoadResourceImage()`.
+
+Some metadata depends on the installed OS. Achievement rarity is available
+from iOS 17 and macOS 14, release state from iOS 18.4 and macOS 15.4, and the
+leaderboard description and hidden state from iOS 26 and macOS 26. Fields use
+safe empty, false or unknown values on earlier systems.
 
 On macOS, Game Center is available to Mac App Store applications, not apps
 distributed outside the store with Developer ID.

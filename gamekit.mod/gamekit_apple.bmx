@@ -54,6 +54,32 @@ Enum EGameCenterTimeScope
 End Enum
 
 Rem
+bbdoc: The persistence model used by a Game Center leaderboard.
+End Rem
+Enum EGameCenterLeaderboardType
+	Classic
+	Recurring
+End Enum
+
+Rem
+bbdoc: The App Store Connect release state of a Game Center resource.
+End Rem
+Enum EGameCenterReleaseState
+	Unknown
+	Released
+	Prereleased
+End Enum
+
+Rem
+bbdoc: Game Center resources that can provide PNG artwork through #LoadResourceImage.
+End Rem
+Enum EGameCenterResourceKind
+	Achievement
+	Leaderboard
+	LeaderboardSet
+End Enum
+
+Rem
 bbdoc: An error returned by GameKit.
 End Rem
 Type TGameCenterError
@@ -123,6 +149,107 @@ Type TGameCenterAchievementResult
 End Type
 
 Rem
+bbdoc: Localized metadata for an achievement configured in App Store Connect.
+End Rem
+Type TGameCenterAchievementDescription
+	Field identifier:String
+	Field groupIdentifier:String
+	Field title:String
+	Field achievedDescription:String
+	Field unachievedDescription:String
+	Field maximumPoints:Int
+	Field hidden:Int
+	Field replayable:Int
+	Field rarityPercent:Double = -1.0
+	Field releaseState:EGameCenterReleaseState
+
+	Function _Create:TGameCenterAchievementDescription(identifier:String, groupIdentifier:String, title:String, achievedDescription:String, unachievedDescription:String, maximumPoints:Int, hidden:Int, replayable:Int, rarityPercent:Double, releaseState:EGameCenterReleaseState)
+		Local description:TGameCenterAchievementDescription = New TGameCenterAchievementDescription
+		description.identifier = identifier
+		description.groupIdentifier = groupIdentifier
+		description.title = title
+		description.achievedDescription = achievedDescription
+		description.unachievedDescription = unachievedDescription
+		description.maximumPoints = maximumPoints
+		description.hidden = hidden
+		description.replayable = replayable
+		description.rarityPercent = rarityPercent
+		description.releaseState = releaseState
+		Return description
+	End Function
+End Type
+
+Rem
+bbdoc: Achievement descriptions returned by a metadata request.
+End Rem
+Type TGameCenterAchievementDescriptionResult
+	Field descriptions:TGameCenterAchievementDescription[]
+End Type
+
+Rem
+bbdoc: Metadata for a classic or recurring leaderboard.
+End Rem
+Type TGameCenterLeaderboardInfo
+	Field identifier:String
+	Field groupIdentifier:String
+	Field title:String
+	Field leaderboardType:EGameCenterLeaderboardType
+	Field startTime:Double
+	Field nextStartTime:Double
+	Field duration:Double
+	Field description:String
+	Field hidden:Int
+	Field releaseState:EGameCenterReleaseState
+
+	Function _Create:TGameCenterLeaderboardInfo(identifier:String, groupIdentifier:String, title:String, leaderboardType:EGameCenterLeaderboardType, startTime:Double, nextStartTime:Double, duration:Double, description:String, hidden:Int, releaseState:EGameCenterReleaseState)
+		Local leaderboard:TGameCenterLeaderboardInfo = New TGameCenterLeaderboardInfo
+		leaderboard.identifier = identifier
+		leaderboard.groupIdentifier = groupIdentifier
+		leaderboard.title = title
+		leaderboard.leaderboardType = leaderboardType
+		leaderboard.startTime = startTime
+		leaderboard.nextStartTime = nextStartTime
+		leaderboard.duration = duration
+		leaderboard.description = description
+		leaderboard.hidden = hidden
+		leaderboard.releaseState = releaseState
+		Return leaderboard
+	End Function
+End Type
+
+Rem
+bbdoc: Leaderboard metadata returned by a request.
+End Rem
+Type TGameCenterLeaderboardInfoResult
+	Field setIdentifier:String
+	Field leaderboards:TGameCenterLeaderboardInfo[]
+End Type
+
+Rem
+bbdoc: A localized collection of related leaderboards.
+End Rem
+Type TGameCenterLeaderboardSet
+	Field identifier:String
+	Field groupIdentifier:String
+	Field title:String
+
+	Function _Create:TGameCenterLeaderboardSet(identifier:String, groupIdentifier:String, title:String)
+		Local set:TGameCenterLeaderboardSet = New TGameCenterLeaderboardSet
+		set.identifier = identifier
+		set.groupIdentifier = groupIdentifier
+		set.title = title
+		Return set
+	End Function
+End Type
+
+Rem
+bbdoc: Leaderboard sets returned by a metadata request.
+End Rem
+Type TGameCenterLeaderboardSetResult
+	Field sets:TGameCenterLeaderboardSet[]
+End Type
+
+Rem
 bbdoc: One ranked entry returned by a Game Center leaderboard.
 End Rem
 Type TGameCenterLeaderboardEntry
@@ -170,10 +297,37 @@ Interface IGameCenterListener
 	Method OnGameCenterViewDismissed(view:EGameCenterView)
 End Interface
 
+Rem
+bbdoc: Optional listener for achievement and leaderboard metadata.
+about: A listener object can implement this interface alongside #IGameCenterListener to receive metadata and artwork results without changing clients that only use the core API.
+End Rem
+Interface IGameCenterMetadataListener
+	Method OnGameCenterAchievementDescriptionsLoaded(requestId:Int, result:TGameCenterAchievementDescriptionResult, error:TGameCenterError)
+	Method OnGameCenterLeaderboardsLoaded(requestId:Int, result:TGameCenterLeaderboardInfoResult, error:TGameCenterError)
+	Method OnGameCenterLeaderboardSetsLoaded(requestId:Int, result:TGameCenterLeaderboardSetResult, error:TGameCenterError)
+	Method OnGameCenterResourceImageLoaded(requestId:Int, kind:EGameCenterResourceKind, identifier:String, pngData:Byte[], error:TGameCenterError)
+End Interface
+
 Private
 
 Type TAchievementLoad
 	Field values:TGameCenterAchievement[]
+	Field index:Int
+End Type
+
+Type TAchievementDescriptionLoad
+	Field values:TGameCenterAchievementDescription[]
+	Field index:Int
+End Type
+
+Type TLeaderboardInfoLoad
+	Field result:TGameCenterLeaderboardInfoResult
+	Field values:TGameCenterLeaderboardInfo[]
+	Field index:Int
+End Type
+
+Type TLeaderboardSetLoad
+	Field values:TGameCenterLeaderboardSet[]
 	Field index:Int
 End Type
 
@@ -196,6 +350,9 @@ Type TGameCenter
 	Field nextRequestId:Int = 1
 	Field achievementLoads:TMap = New TMap
 	Field leaderboardLoads:TMap = New TMap
+	Field achievementDescriptionLoads:TMap = New TMap
+	Field leaderboardInfoLoads:TMap = New TMap
+	Field leaderboardSetLoads:TMap = New TMap
 
 	Rem
 	bbdoc: Returns the process-wide Game Center service.
@@ -228,6 +385,9 @@ Type TGameCenter
 		listener = Null
 		achievementLoads.Clear()
 		leaderboardLoads.Clear()
+		achievementDescriptionLoads.Clear()
+		leaderboardInfoLoads.Clear()
+		leaderboardSetLoads.Clear()
 	End Method
 
 	Rem
@@ -279,6 +439,16 @@ Type TGameCenter
 	End Method
 
 	Rem
+	bbdoc: Loads the localized descriptions of every achievement configured for the game.
+	returns: A request identifier supplied to #IGameCenterMetadataListener.
+	End Rem
+	Method LoadAchievementDescriptions:Int()
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_load_achievement_descriptions(requestId)
+		Return requestId
+	End Method
+
+	Rem
 	bbdoc: Resets every achievement for the local player.
 	returns: A request identifier supplied to the listener callback.
 	End Rem
@@ -295,6 +465,37 @@ Type TGameCenter
 	Method SubmitScore:Int(leaderboardIdentifier:String, score:Long, context:ULong = 0)
 		Local requestId:Int = NextRequest()
 		bmx_gamekit_submit_score(requestId, leaderboardIdentifier, score, context)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Loads metadata for every classic and recurring leaderboard in the game, or for the supplied leaderboard set.
+	about: Pass an empty set identifier to load every leaderboard.
+	returns: A request identifier supplied to #IGameCenterMetadataListener.
+	End Rem
+	Method LoadLeaderboards:Int(setIdentifier:String = "")
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_load_leaderboards(requestId, setIdentifier)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Loads every leaderboard set configured for the game.
+	returns: A request identifier supplied to #IGameCenterMetadataListener.
+	End Rem
+	Method LoadLeaderboardSets:Int()
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_load_leaderboard_sets(requestId)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Loads PNG artwork for an achievement, leaderboard, or leaderboard set.
+	returns: A request identifier supplied to #IGameCenterMetadataListener.
+	End Rem
+	Method LoadResourceImage:Int(kind:EGameCenterResourceKind, identifier:String)
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_load_resource_image(requestId, kind, identifier)
 		Return requestId
 	End Method
 
@@ -357,6 +558,33 @@ Type TGameCenter
 		If service.listener Then service.listener.OnGameCenterAchievementsLoaded(requestId, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
 	End Function
 
+	Function _OnAchievementDescriptionLoadBegin(service:TGameCenter, requestId:Int, count:Int) { nomangle }
+		Local load:TAchievementDescriptionLoad = New TAchievementDescriptionLoad
+		load.values = New TGameCenterAchievementDescription[count]
+		service.achievementDescriptionLoads.Insert(String.FromInt(requestId), load)
+	End Function
+
+	Function _OnAchievementDescriptionLoaded(service:TGameCenter, requestId:Int, identifier:String, groupIdentifier:String, title:String, achievedDescription:String, unachievedDescription:String, maximumPoints:Int, hidden:Int, replayable:Int, rarityPercent:Double, releaseState:EGameCenterReleaseState) { nomangle }
+		Local load:TAchievementDescriptionLoad = TAchievementDescriptionLoad(service.achievementDescriptionLoads.ValueForKey(String.FromInt(requestId)))
+		If load And load.index < load.values.length Then
+			load.values[load.index] = TGameCenterAchievementDescription._Create(identifier, groupIdentifier, title, achievedDescription, unachievedDescription, maximumPoints, hidden, replayable, rarityPercent, releaseState)
+			load.index :+ 1
+		End If
+	End Function
+
+	Function _OnAchievementDescriptionLoadComplete(service:TGameCenter, requestId:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local key:String = String.FromInt(requestId)
+		Local load:TAchievementDescriptionLoad = TAchievementDescriptionLoad(service.achievementDescriptionLoads.ValueForKey(key))
+		service.achievementDescriptionLoads.Remove(key)
+		Local result:TGameCenterAchievementDescriptionResult
+		If load Then
+			result = New TGameCenterAchievementDescriptionResult
+			result.descriptions = load.values
+		End If
+		Local metadataListener:IGameCenterMetadataListener = IGameCenterMetadataListener(service.listener)
+		If metadataListener Then metadataListener.OnGameCenterAchievementDescriptionsLoaded(requestId, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
 	Function _OnAchievementsReset(service:TGameCenter, requestId:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
 		If service.listener Then service.listener.OnGameCenterAchievementsReset(requestId, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
 	End Function
@@ -400,6 +628,67 @@ Type TGameCenter
 		If service.listener Then service.listener.OnGameCenterLeaderboardLoaded(requestId, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
 	End Function
 
+	Function _OnLeaderboardInfoLoadBegin(service:TGameCenter, requestId:Int, setIdentifier:String, count:Int) { nomangle }
+		Local load:TLeaderboardInfoLoad = New TLeaderboardInfoLoad
+		load.result = New TGameCenterLeaderboardInfoResult
+		load.result.setIdentifier = setIdentifier
+		load.values = New TGameCenterLeaderboardInfo[count]
+		service.leaderboardInfoLoads.Insert(String.FromInt(requestId), load)
+	End Function
+
+	Function _OnLeaderboardInfoLoaded(service:TGameCenter, requestId:Int, identifier:String, groupIdentifier:String, title:String, leaderboardType:EGameCenterLeaderboardType, startTime:Double, nextStartTime:Double, duration:Double, description:String, hidden:Int, releaseState:EGameCenterReleaseState) { nomangle }
+		Local load:TLeaderboardInfoLoad = TLeaderboardInfoLoad(service.leaderboardInfoLoads.ValueForKey(String.FromInt(requestId)))
+		If load And load.index < load.values.length Then
+			load.values[load.index] = TGameCenterLeaderboardInfo._Create(identifier, groupIdentifier, title, leaderboardType, startTime, nextStartTime, duration, description, hidden, releaseState)
+			load.index :+ 1
+		End If
+	End Function
+
+	Function _OnLeaderboardInfoLoadComplete(service:TGameCenter, requestId:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local key:String = String.FromInt(requestId)
+		Local load:TLeaderboardInfoLoad = TLeaderboardInfoLoad(service.leaderboardInfoLoads.ValueForKey(key))
+		service.leaderboardInfoLoads.Remove(key)
+		Local result:TGameCenterLeaderboardInfoResult
+		If load Then
+			load.result.leaderboards = load.values
+			result = load.result
+		End If
+		Local metadataListener:IGameCenterMetadataListener = IGameCenterMetadataListener(service.listener)
+		If metadataListener Then metadataListener.OnGameCenterLeaderboardsLoaded(requestId, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnLeaderboardSetLoadBegin(service:TGameCenter, requestId:Int, count:Int) { nomangle }
+		Local load:TLeaderboardSetLoad = New TLeaderboardSetLoad
+		load.values = New TGameCenterLeaderboardSet[count]
+		service.leaderboardSetLoads.Insert(String.FromInt(requestId), load)
+	End Function
+
+	Function _OnLeaderboardSetLoaded(service:TGameCenter, requestId:Int, identifier:String, groupIdentifier:String, title:String) { nomangle }
+		Local load:TLeaderboardSetLoad = TLeaderboardSetLoad(service.leaderboardSetLoads.ValueForKey(String.FromInt(requestId)))
+		If load And load.index < load.values.length Then
+			load.values[load.index] = TGameCenterLeaderboardSet._Create(identifier, groupIdentifier, title)
+			load.index :+ 1
+		End If
+	End Function
+
+	Function _OnLeaderboardSetLoadComplete(service:TGameCenter, requestId:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local key:String = String.FromInt(requestId)
+		Local load:TLeaderboardSetLoad = TLeaderboardSetLoad(service.leaderboardSetLoads.ValueForKey(key))
+		service.leaderboardSetLoads.Remove(key)
+		Local result:TGameCenterLeaderboardSetResult
+		If load Then
+			result = New TGameCenterLeaderboardSetResult
+			result.sets = load.values
+		End If
+		Local metadataListener:IGameCenterMetadataListener = IGameCenterMetadataListener(service.listener)
+		If metadataListener Then metadataListener.OnGameCenterLeaderboardSetsLoaded(requestId, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnResourceImageLoaded(service:TGameCenter, requestId:Int, kind:EGameCenterResourceKind, identifier:String, pngData:Byte[], errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local metadataListener:IGameCenterMetadataListener = IGameCenterMetadataListener(service.listener)
+		If metadataListener Then metadataListener.OnGameCenterResourceImageLoaded(requestId, kind, identifier, pngData, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
 	Function _OnViewDismissed(service:TGameCenter, view:EGameCenterView) { nomangle }
 		If service.listener Then service.listener.OnGameCenterViewDismissed(view)
 	End Function
@@ -418,7 +707,11 @@ Extern
 	Function bmx_gamekit_show(view:EGameCenterView)
 	Function bmx_gamekit_report_achievement(requestId:Int, identifier:String, percentComplete:Double, showCompletionBanner:Int)
 	Function bmx_gamekit_load_achievements(requestId:Int)
+	Function bmx_gamekit_load_achievement_descriptions(requestId:Int)
 	Function bmx_gamekit_reset_achievements(requestId:Int)
 	Function bmx_gamekit_submit_score(requestId:Int, leaderboardIdentifier:String, score:Long, context:ULong)
 	Function bmx_gamekit_load_leaderboard(requestId:Int, leaderboardIdentifier:String, playerScope:EGameCenterPlayerScope, timeScope:EGameCenterTimeScope, startRank:Int, count:Int)
+	Function bmx_gamekit_load_leaderboards(requestId:Int, setIdentifier:String)
+	Function bmx_gamekit_load_leaderboard_sets(requestId:Int)
+	Function bmx_gamekit_load_resource_image(requestId:Int, kind:EGameCenterResourceKind, identifier:String)
 End Extern
