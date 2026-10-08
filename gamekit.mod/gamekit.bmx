@@ -5,7 +5,7 @@ bbdoc: Apple GameKit and Game Center services.
 End Rem
 Module Apple.GameKit
 
-ModuleInfo "Version: 0.4"
+ModuleInfo "Version: 0.5"
 ModuleInfo "License: zlib/libpng"
 ModuleInfo "Copyright: Wrapper - 2026 Bruce A Henderson"
 

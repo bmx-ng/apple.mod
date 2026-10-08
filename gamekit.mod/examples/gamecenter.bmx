@@ -19,7 +19,7 @@ Function ShowError(context:String, error:TGameCenterError)
 	Print statusText + ": " + errorText
 End Function
 
-Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGameCenterPlayerListener
+Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGameCenterPlayerListener, IGameCenterIdentityListener
 	Method OnGameCenterAuthenticationChanged(authenticated:Int, player:TGameCenterPlayer, error:TGameCenterError)
 		If error Then
 			ShowError("Authentication failed", error)
@@ -135,6 +135,17 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 			Print "Loaded " + pngData.length + " bytes of player photo PNG"
 		End If
 	End Method
+
+	Method OnGameCenterIdentityVerificationFetched(requestId:Int, verification:TGameCenterIdentityVerification, error:TGameCenterError)
+		If error Then
+			ShowError("Identity verification failed", error)
+		Else
+			statusText = "Fetched server identity payload"
+			detailText = verification.signature.length + " signature bytes; timestamp " + verification.timestamp
+			Print "Identity public key: " + verification.publicKeyUrl
+			Print "Identity bundle: " + verification.bundleIdentifier
+		End If
+	End Method
 End Type
 
 Graphics SCREEN_WIDTH, SCREEN_HEIGHT
@@ -156,13 +167,19 @@ While Not AppTerminate()
 	DrawText "Access point active: " + gameCenter.IsAccessPointActive() + "  visible: " + gameCenter.IsAccessPointVisible(), 60, 195
 	SetColor 55, 155, 235
 	DrawRect 60, 250, 300, 60
+	DrawRect 400, 250, 300, 60
 	SetColor 255, 255, 255
 	DrawText "Open Game Center", 90, 270
+	DrawText "Fetch identity payload", 430, 270
 
 	If MouseHit(1) Then
 		Local mouseX:Float, mouseY:Float
-		If GetVirtualMouse(mouseX, mouseY, True) And mouseX >= 60 And mouseX < 360 And mouseY >= 250 And mouseY < 310 Then
-			gameCenter.ShowGameCenter(EGameCenterView.Dashboard)
+		If GetVirtualMouse(mouseX, mouseY, True) And mouseY >= 250 And mouseY < 310 Then
+			If mouseX >= 60 And mouseX < 360 Then
+				gameCenter.ShowGameCenter(EGameCenterView.Dashboard)
+			Else If mouseX >= 400 And mouseX < 700 Then
+				gameCenter.FetchIdentityVerification()
+			End If
 		End If
 	End If
 	Flip

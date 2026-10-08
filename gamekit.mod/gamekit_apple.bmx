@@ -117,6 +117,32 @@ Type TGameCenterError
 End Type
 
 Rem
+bbdoc: A signed Game Center identity payload for verification by an application server.
+about: Send every field to a trusted server promptly. The server, not the game client, must validate the Apple certificate and signature, require a recent timestamp, and prevent replay. For non-Apple-Arcade games Apple signs teamPlayerId, bundleIdentifier, timestamp in big-endian order, and salt.
+End Rem
+Type TGameCenterIdentityVerification
+	Field gamePlayerId:String
+	Field teamPlayerId:String
+	Field bundleIdentifier:String
+	Field publicKeyUrl:String
+	Field signature:Byte[]
+	Field salt:Byte[]
+	Field timestamp:ULong
+
+	Function _Create:TGameCenterIdentityVerification(gamePlayerId:String, teamPlayerId:String, bundleIdentifier:String, publicKeyUrl:String, signature:Byte[], salt:Byte[], timestamp:ULong)
+		Local verification:TGameCenterIdentityVerification = New TGameCenterIdentityVerification
+		verification.gamePlayerId = gamePlayerId
+		verification.teamPlayerId = teamPlayerId
+		verification.bundleIdentifier = bundleIdentifier
+		verification.publicKeyUrl = publicKeyUrl
+		verification.signature = signature
+		verification.salt = salt
+		verification.timestamp = timestamp
+		Return verification
+	End Function
+End Type
+
+Rem
 bbdoc: Public information about a Game Center player.
 End Rem
 Type TGameCenterPlayer
@@ -351,6 +377,14 @@ Interface IGameCenterListener
 End Interface
 
 Rem
+bbdoc: Optional listener for server-side Game Center identity verification payloads.
+about: A listener object can implement this interface alongside #IGameCenterListener. Never treat the payload as verified in the game client; forward it to a trusted server for validation.
+End Rem
+Interface IGameCenterIdentityListener
+	Method OnGameCenterIdentityVerificationFetched(requestId:Int, verification:TGameCenterIdentityVerification, error:TGameCenterError)
+End Interface
+
+Rem
 bbdoc: Optional listener for achievement and leaderboard metadata.
 about: A listener object can implement this interface alongside #IGameCenterListener to receive metadata and artwork results without changing clients that only use the core API.
 End Rem
@@ -495,6 +529,17 @@ Type TGameCenter
 	End Rem
 	Method IsAuthenticated:Int()
 		Return bmx_gamekit_is_authenticated()
+	End Method
+
+	Rem
+	bbdoc: Fetches a signed identity payload for authenticating the local player with an application server.
+	about: The payload is short-lived and must be forwarded promptly to a trusted server. It does not authenticate the player until that server has validated Apple's certificate and signature, checked the timestamp, and prevented replay.
+	returns: A request identifier supplied to #IGameCenterIdentityListener.
+	End Rem
+	Method FetchIdentityVerification:Int()
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_fetch_identity_verification(requestId)
+		Return requestId
 	End Method
 
 	Rem
@@ -750,6 +795,15 @@ Type TGameCenter
 		End If
 		service.localPlayer = player
 		If service.listener Then service.listener.OnGameCenterAuthenticationChanged(authenticated, player, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnIdentityVerificationFetched(service:TGameCenter, requestId:Int, gamePlayerId:String, teamPlayerId:String, bundleIdentifier:String, publicKeyUrl:String, signature:Byte[], salt:Byte[], timestamp:ULong, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local verification:TGameCenterIdentityVerification
+		If Not errorDomain Then
+			verification = TGameCenterIdentityVerification._Create(gamePlayerId, teamPlayerId, bundleIdentifier, publicKeyUrl, signature, salt, timestamp)
+		End If
+		Local identityListener:IGameCenterIdentityListener = IGameCenterIdentityListener(service.listener)
+		If identityListener Then identityListener.OnGameCenterIdentityVerificationFetched(requestId, verification, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
 	End Function
 
 	Function _OnAchievementReported(service:TGameCenter, requestId:Int, identifier:String, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
@@ -1033,6 +1087,7 @@ Extern
 	Function bmx_gamekit_stop()
 	Function bmx_gamekit_is_available:Int()
 	Function bmx_gamekit_is_authenticated:Int()
+	Function bmx_gamekit_fetch_identity_verification(requestId:Int)
 	Function bmx_gamekit_set_access_point_active(active:Int, location:EGameCenterAccessPointLocation)
 	Function bmx_gamekit_is_access_point_active:Int()
 	Function bmx_gamekit_is_access_point_visible:Int()
