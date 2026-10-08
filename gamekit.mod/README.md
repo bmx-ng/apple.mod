@@ -3,8 +3,8 @@
 `Apple.GameKit` provides BlitzMax access to Apple's Game Center service on iOS
 and macOS. The API covers local-player authentication, server identity
 verification, players and friends, achievements, leaderboards, iCloud saved
-games, developer-defined challenges, resource artwork and the Game Center
-access point.
+games, developer-defined challenges, game activities, resource artwork and the
+Game Center access point.
 
 The module contains no public API on non-Apple targets. This allows shared
 projects to import it conditionally without compiling Apple-specific types or
@@ -27,8 +27,8 @@ leaderboard. `LoadChallengeDefinitions()` returns the localized title, details,
 duration choices, repeatability, associated leaderboard and release state for
 each non-archived definition. `LoadChallengeActiveStatus()` reports whether a
 particular definition currently has active challenges associated with it.
-Implement `IGameCenterChallengeListener` to receive both results. Challenge
-When configured, challenge artwork is available through `LoadResourceImage()`
+Implement `IGameCenterChallengeListener` to receive both results. When
+configured, challenge artwork is available through `LoadResourceImage()`
 with `EGameCenterResourceKind.Challenge`; no artwork is also a valid result.
 
 The game does not submit challenge progress separately. Call `SubmitScore()`
@@ -59,6 +59,46 @@ prepare the application before Game Center delivers the activity event.
 
 Game Center sends and displays the challenge notification. No custom push
 server or additional push-notification entitlement is needed for this flow.
+
+## Game activities
+
+Game activities are developer-defined destinations in a game, introduced in
+iOS 26 and macOS 26. They let the Games app, Game Center leaderboards,
+achievements and challenges take a player directly to content such as a level,
+daily puzzle or multiplayer lobby. Use `AreActivitiesAvailable()` before
+showing activity-specific controls on applications that support older systems.
+
+`LoadActivityDefinitions()` returns each configured activity's localized
+metadata, default string properties, player limits, play style, release state,
+fallback URL, party-code support and associated leaderboard and achievement
+identifiers. Activity artwork is available through `LoadResourceImage()` with
+`EGameCenterResourceKind.Activity`. Implement
+`IGameCenterActivityManagementListener` to receive metadata and lifecycle
+results; the previously introduced `IGameCenterActivityListener` remains
+focused on pending and incoming deep-link events.
+
+`StartActivity(identifier)` creates an active instance. A definition that
+supports parties may instead be started with a valid party code using the
+second argument. `IsValidActivityPartyCode()` checks only the code format; the
+definition must still support party codes. Multiplayer matchmaking itself is
+outside the current activity API.
+
+Use `PauseActivity()` and `ResumeActivity()` around interruptions that should
+not count towards active duration. `SetActivityProperty()` adds application
+specific routing data. `SetActivityScore()` and
+`SetActivityAchievementProgress()` queue progress on the activity rather than
+submitting it immediately. `EndActivity()` is terminal and asks Game Center to
+submit that accumulated progress. Keep the updated activity object returned by
+`OnGameCenterActivityUpdated()` because it contains the current state, dates,
+duration and native session handle.
+
+Incoming deep links arrive through `OnGameCenterWantsToPlayActivity()`. Route
+the player using `definitionIdentifier` and `properties`, then return `True` if
+the application accepted the request. The received activity can be paused,
+resumed, updated and ended through the same lifecycle API. Start Game Center
+early so cold-launch requests are not missed. `CheckPendingGameActivity()` can
+be called before or during startup to determine whether the application should
+prepare for an incoming activity; it does not consume the request.
 
 ## Application setup
 

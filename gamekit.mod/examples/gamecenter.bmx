@@ -6,13 +6,17 @@ Import BRL.PolledInput
 Import BRL.StandardIO
 
 Const SCREEN_WIDTH:Int = 800
-Const SCREEN_HEIGHT:Int = 450
+Const SCREEN_HEIGHT:Int = 570
 
 Global statusText:String = "Starting Game Center..."
 Global detailText:String = ""
 Global errorText:String = ""
 Global metadataRequested:Int
 Global firstChallengeId:String
+Global firstActivityId:String
+Global firstActivityLeaderboardId:String
+Global firstActivityAchievementId:String
+Global currentActivity:TGameCenterActivity
 
 Function ShowError(context:String, error:TGameCenterError)
 	statusText = context
@@ -20,7 +24,7 @@ Function ShowError(context:String, error:TGameCenterError)
 	Print statusText + ": " + errorText
 End Function
 
-Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGameCenterPlayerListener, IGameCenterIdentityListener, IGameCenterChallengeListener, IGameCenterActivityListener
+Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGameCenterPlayerListener, IGameCenterIdentityListener, IGameCenterChallengeListener, IGameCenterActivityListener, IGameCenterActivityManagementListener
 	Method OnGameCenterAuthenticationChanged(authenticated:Int, player:TGameCenterPlayer, error:TGameCenterError)
 		If error Then
 			ShowError("Authentication failed", error)
@@ -34,6 +38,7 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 				TGameCenter.Shared().LoadLeaderboards()
 				TGameCenter.Shared().LoadLeaderboardSets()
 				If TGameCenter.Shared().AreChallengesAvailable() Then TGameCenter.Shared().LoadChallengeDefinitions()
+				If TGameCenter.Shared().AreActivitiesAvailable() Then TGameCenter.Shared().LoadActivityDefinitions()
 			End If
 		Else
 			statusText = "Game Center is not authenticated"
@@ -110,9 +115,9 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 
 	Method OnGameCenterResourceImageLoaded(requestId:Int, kind:EGameCenterResourceKind, identifier:String, pngData:Byte[], error:TGameCenterError)
 		If error Then
-			If kind = EGameCenterResourceKind.Challenge Then
-				statusText = "Challenge artwork unavailable (optional)"
-				Print "Challenge artwork unavailable for " + identifier + ": " + error.message
+			If kind = EGameCenterResourceKind.Challenge Or kind = EGameCenterResourceKind.Activity Then
+				statusText = "Optional artwork unavailable"
+				Print "Optional artwork unavailable for " + identifier + ": " + error.message
 			Else
 				ShowError("Artwork load failed", error)
 			End If
@@ -197,7 +202,37 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 		End If
 	End Method
 
+	Method OnGameCenterActivityDefinitionsLoaded(requestId:Int, result:TGameCenterActivityDefinitionResult, error:TGameCenterError)
+		If error Then
+			ShowError("Activity metadata failed", error)
+		Else
+			Local count:Int
+			If result Then count = result.definitions.length
+			statusText = "Loaded " + count + " activity definitions"
+			If count Then
+				Local definition:TGameCenterActivityDefinition = result.definitions[0]
+				firstActivityId = definition.identifier
+				If definition.leaderboardIdentifiers.length Then firstActivityLeaderboardId = definition.leaderboardIdentifiers[0]
+				If definition.achievementIdentifiers.length Then firstActivityAchievementId = definition.achievementIdentifiers[0]
+				detailText = definition.title
+				TGameCenter.Shared().LoadResourceImage(EGameCenterResourceKind.Activity, firstActivityId)
+			End If
+		End If
+	End Method
+
+	Method OnGameCenterActivityUpdated(requestId:Int, operation:EGameCenterActivityOperation, activity:TGameCenterActivity, error:TGameCenterError)
+		If error Then
+			ShowError("Activity operation failed", error)
+		Else
+			currentActivity = activity
+			statusText = "Activity operation " + operation.Ordinal() + " completed"
+			If activity Then detailText = activity.definitionIdentifier + " state " + activity.state.Ordinal()
+			If activity And operation = EGameCenterActivityOperation.Started Then TGameCenter.Shared().SetActivityProperty(activity, "client", "BlitzMax")
+		End If
+	End Method
+
 	Method OnGameCenterWantsToPlayActivity:Int(player:TGameCenterPlayer, activity:TGameCenterActivity)
+		currentActivity = activity
 		statusText = "Game Center activity selected"
 		detailText = activity.definitionIdentifier
 		Print "Route to activity: " + activity.definitionIdentifier
@@ -229,11 +264,19 @@ While Not AppTerminate()
 	DrawRect 400, 250, 300, 60
 	DrawRect 60, 330, 300, 60
 	DrawRect 400, 330, 300, 60
+	DrawRect 60, 410, 300, 60
+	DrawRect 400, 410, 300, 60
+	DrawRect 60, 490, 300, 60
+	DrawRect 400, 490, 300, 60
 	SetColor 255, 255, 255
 	DrawText "Open Game Center", 90, 270
 	DrawText "Fetch identity payload", 430, 270
 	DrawText "Browse active challenges", 90, 350
 	DrawText "Create first challenge", 430, 350
+	DrawText "Start first activity", 90, 430
+	DrawText "Pause / resume activity", 430, 430
+	DrawText "Queue linked progress", 90, 510
+	DrawText "End activity (submit)", 430, 510
 
 	If MouseHit(1) Then
 		Local mouseX:Float, mouseY:Float
@@ -253,6 +296,30 @@ While Not AppTerminate()
 					Else
 						statusText = "No challenge definition loaded"
 					End If
+				End If
+			Else If mouseY >= 410 And mouseY < 470 Then
+				If mouseX >= 60 And mouseX < 360 Then
+					If firstActivityId Then gameCenter.StartActivity(firstActivityId) Else statusText = "No activity definition loaded"
+				Else If mouseX >= 400 And mouseX < 700 Then
+					If Not currentActivity Then
+						statusText = "No activity is running"
+					Else If currentActivity.state = EGameCenterActivityState.Paused Then
+						gameCenter.ResumeActivity(currentActivity)
+					Else
+						gameCenter.PauseActivity(currentActivity)
+					End If
+				End If
+			Else If mouseY >= 490 And mouseY < 550 Then
+				If mouseX >= 60 And mouseX < 360 Then
+					If Not currentActivity Then
+						statusText = "No activity is running"
+					Else
+						If firstActivityLeaderboardId Then gameCenter.SetActivityScore(currentActivity, firstActivityLeaderboardId, 100)
+						If firstActivityAchievementId Then gameCenter.SetActivityAchievementProgress(currentActivity, firstActivityAchievementId, 10)
+						If Not firstActivityLeaderboardId And Not firstActivityAchievementId Then statusText = "Activity has no linked progress resources"
+					End If
+				Else If mouseX >= 400 And mouseX < 700 Then
+					If currentActivity Then gameCenter.EndActivity(currentActivity) Else statusText = "No activity is running"
 				End If
 			End If
 		End If

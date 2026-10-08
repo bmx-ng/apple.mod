@@ -6,8 +6,8 @@ Native integrations for Apple platform services.
 
 - [`Apple.GameKit`](gamekit.mod/README.md) provides Game Center authentication,
   server identity verification, players and friends, achievements,
-  leaderboards, developer-defined challenges, iCloud saved games and Apple's
-  standard Game Center access point on iOS and macOS.
+  leaderboards, developer-defined challenges, game activities, iCloud saved
+  games and Apple's standard Game Center access point on iOS and macOS.
 
 Install this repository as `mod/apple.mod` in a bcc2-based BlitzMax NG SDK:
 
