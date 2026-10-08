@@ -1,9 +1,9 @@
 # Apple.GameKit
 
 `Apple.GameKit` provides BlitzMax access to Apple's Game Center service on iOS
-and macOS. The API covers local-player authentication, players and friends,
-achievements, leaderboards, iCloud saved games, resource artwork and the Game
-Center access point.
+and macOS. The API covers local-player authentication, server identity
+verification, players and friends, achievements, leaderboards, iCloud saved
+games, resource artwork and the Game Center access point.
 
 The module contains no public API on non-Apple targets. This allows shared
 projects to import it conditionally without compiling Apple-specific types or
@@ -36,6 +36,23 @@ building for a device or using Game Center services.
 Call `TGameCenter.Shared().Start(listener)` near application startup. GameKit
 may invoke the authentication callback more than once as the player's account
 state changes.
+
+## Server identity verification
+
+`FetchIdentityVerification()` retrieves Apple's signed identity payload for the
+authenticated local player. Implement `IGameCenterIdentityListener` to receive
+the public-key URL, signature bytes, salt bytes, timestamp, scoped player IDs,
+and application bundle identifier. Forward all of these values promptly to a
+trusted application server.
+
+Receiving the payload does not itself verify the player. The server must require
+a recent timestamp, prevent replay, download and cache the public key according
+to its HTTP cache headers, verify that Apple signed its certificate, and verify
+the signature over the documented byte sequence. For a normal Game Center game
+that sequence is the UTF-8 team player ID, UTF-8 bundle identifier, timestamp as
+a big-endian unsigned 64-bit integer, and salt. Apple Arcade games use the game
+player ID instead. Trust only the fields covered by the successful signature;
+aliases and display names are player-controlled presentation data.
 
 Implement `IGameCenterListener` for authentication and gameplay operations.
 An object can additionally implement `IGameCenterMetadataListener` to receive

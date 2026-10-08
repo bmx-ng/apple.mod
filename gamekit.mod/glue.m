@@ -11,6 +11,7 @@
 #endif
 
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnAuthenticationChanged(BBObject *, int, BBString *, BBString *, BBString *, BBString *, int, int, int, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnIdentityVerificationFetched(BBObject *, int, BBString *, BBString *, BBString *, BBString *, BBArray *, BBArray *, BBULONG, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnAchievementReported(BBObject *, int, BBString *, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnAchievementLoadBegin(BBObject *, int, int);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnAchievementLoaded(BBObject *, int, BBString *, double, int, double);
@@ -556,6 +557,48 @@ int bmx_gamekit_is_available(void) {
 
 int bmx_gamekit_is_authenticated(void) {
     return GKLocalPlayer.localPlayer.isAuthenticated;
+}
+
+void bmx_gamekit_fetch_identity_verification(int requestId) {
+    DispatchMain(^{
+        GKLocalPlayer *player = GKLocalPlayer.localPlayer;
+        if (!player.isAuthenticated) {
+            NSError *error = ModuleError(-2, @"The local player is not authenticated with Game Center.");
+            CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                apple_gamekit_gamekit_apple_TGameCenter__OnIdentityVerificationFetched(
+                    bmxGameKitService, requestId, &bbEmptyString, &bbEmptyString, &bbEmptyString,
+                    &bbEmptyString, &bbEmptyArray, &bbEmptyArray, 0, domain, code, message);
+            }, error);
+            return;
+        }
+        if (@available(iOS 13.5, macOS 10.15.5, *)) {
+            [player fetchItemsForIdentityVerificationSignature:^(NSURL *publicKeyURL, NSData *signature, NSData *salt, uint64_t timestamp, NSError *error) {
+                DispatchMain(^{
+                    if (!bmxGameKitService) return;
+                    NSError *callbackError = error;
+                    if (!callbackError && (!publicKeyURL || !signature.length || !salt.length || !timestamp)) {
+                        callbackError = ModuleError(-4, @"Game Center returned an incomplete identity verification payload.");
+                    }
+                    CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                        apple_gamekit_gamekit_apple_TGameCenter__OnIdentityVerificationFetched(
+                            bmxGameKitService, requestId,
+                            BBStringFromNSString(player.gamePlayerID), BBStringFromNSString(player.teamPlayerID),
+                            BBStringFromNSString(NSBundle.mainBundle.bundleIdentifier),
+                            BBStringFromNSString(publicKeyURL.absoluteString),
+                            BBByteArrayFromNSData(signature), BBByteArrayFromNSData(salt),
+                            (BBULONG)timestamp, domain, code, message);
+                    }, callbackError);
+                });
+            }];
+        } else {
+            NSError *error = ModuleError(-1, @"Identity verification requires iOS 13.5 or macOS 10.15.5.");
+            CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                apple_gamekit_gamekit_apple_TGameCenter__OnIdentityVerificationFetched(
+                    bmxGameKitService, requestId, &bbEmptyString, &bbEmptyString, &bbEmptyString,
+                    &bbEmptyString, &bbEmptyArray, &bbEmptyArray, 0, domain, code, message);
+            }, error);
+        }
+    });
 }
 
 void bmx_gamekit_set_access_point_active(int active, int location) {
