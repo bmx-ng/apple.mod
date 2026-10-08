@@ -2,7 +2,7 @@
 
 `Apple.GameKit` provides BlitzMax access to Apple's Game Center service on iOS
 and macOS. The API covers local-player authentication, players and friends,
-achievements, leaderboards, leaderboard sets, resource artwork and the Game
+achievements, leaderboards, iCloud saved games, resource artwork and the Game
 Center access point.
 
 The module contains no public API on non-Apple targets. This allows shared
@@ -61,6 +61,48 @@ its iOS 14/macOS 11 baseline.
 If authorization becomes denied or restricted, discard any friend data the
 game has stored. The module drops its in-memory friend objects automatically;
 the application remains responsible for its own persisted data.
+
+## Saved games
+
+GameKit saved games are named, opaque byte arrays stored in the local player's
+iCloud account. GameKit does not inspect or understand their contents. The game
+owns its serialization format, schema versions, validation, migration,
+compression and conflict policy. Keep saves compact and include enough format
+information in the data to read older versions safely.
+
+`SaveGame()` creates or replaces a named save, `FetchSavedGames()` returns its
+metadata, `LoadSavedGame()` retrieves the bytes for a returned version, and
+`DeleteSavedGames()` removes every version with a name. Implement
+`IGameCenterSavedGameListener` to receive these results as well as remote-change
+and conflict events.
+
+Conflicts can occur when multiple devices change the same name while offline.
+The conflict callback supplies all exact versions and a session-scoped conflict
+identifier. Load the versions, choose or merge their bytes, and pass the final
+data to `ResolveSavedGameConflict()`. Do not resolve by filename alone.
+
+Saved games require the iCloud capability on the application target. In the
+generated Xcode project:
+
+1. Select the application target and choose the Apple Developer **Team** under
+   Signing & Capabilities. Xcode cannot register or select an iCloud container
+   until a team has been chosen.
+2. Add the **iCloud** capability, enable **iCloud Documents**, and select or
+   create the application's iCloud container. A conventional identifier is the
+   bundle identifier prefixed with `iCloud.`, for example
+   `iCloud.net.example.mygame`.
+3. Keep the separate **Game Center** capability enabled. Adding iCloud must not
+   remove the `com.apple.developer.game-center` entitlement.
+
+Xcode writes the iCloud container and Cloud Documents entitlements and updates
+the provisioning profile. The player must also be signed into iCloud and have
+iCloud Drive enabled. As noted above, the generated BlitzMax Xcode project does
+not currently preserve target capabilities across regeneration, so recheck
+both Game Center and iCloud after rebuilding the project.
+
+`deviceName` may be a generic device description. Access to a person's custom
+device name requires Apple's separately controlled user-assigned-device-name
+entitlement and should not be assumed by a game.
 
 `ShowAccessPoint()` and `HideAccessPoint()` explicitly control Apple's floating
 Game Center widget. `IsAccessPointActive()` reports the requested state,

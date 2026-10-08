@@ -35,10 +35,22 @@ extern void apple_gamekit_gamekit_apple_TGameCenter__OnFriendsLoadBegin(BBObject
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnFriendLoaded(BBObject *, int, BBString *, BBString *, BBString *, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnFriendsLoadComplete(BBObject *, int, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnPlayerPhotoLoaded(BBObject *, int, BBString *, int, BBArray *, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameListBegin(BBObject *, int, int, int);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameListItem(BBObject *, int, int, int, BBString *, BBString *, double);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameListComplete(BBObject *, int, int, int, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameSaved(BBObject *, int, int, BBString *, BBString *, double, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameDataLoaded(BBObject *, int, int, BBArray *, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnSavedGamesDeleted(BBObject *, int, BBString *, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameModified(BBObject *, int, BBString *, BBString *, double);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnViewDismissed(BBObject *, int);
 
 static BBObject *bmxGameKitService = NULL;
 static NSMutableDictionary<NSString *, GKPlayer *> *bmxGameKitPlayers = nil;
+static NSMutableDictionary<NSNumber *, GKSavedGame *> *bmxGameKitSavedGames = nil;
+static NSMutableDictionary<NSNumber *, NSArray<GKSavedGame *> *> *bmxGameKitSavedGameConflicts = nil;
+static NSString *bmxGameKitAuthenticatedPlayerID = nil;
+static int bmxGameKitNextSavedGameHandle = 1;
+static int bmxGameKitNextConflictHandle = 1;
 
 static NSMutableDictionary<NSString *, GKPlayer *> *PlayerCache(void) {
     if (!bmxGameKitPlayers) bmxGameKitPlayers = [[NSMutableDictionary alloc] init];
@@ -51,6 +63,35 @@ static void ResetPlayerCache(void) {
     if (!player.isAuthenticated) return;
     if (player.gamePlayerID.length) PlayerCache()[player.gamePlayerID] = player;
     if (player.teamPlayerID.length) PlayerCache()[player.teamPlayerID] = player;
+}
+
+static NSMutableDictionary<NSNumber *, GKSavedGame *> *SavedGameCache(void) {
+    if (!bmxGameKitSavedGames) bmxGameKitSavedGames = [[NSMutableDictionary alloc] init];
+    return bmxGameKitSavedGames;
+}
+
+static NSMutableDictionary<NSNumber *, NSArray<GKSavedGame *> *> *SavedGameConflictCache(void) {
+    if (!bmxGameKitSavedGameConflicts) bmxGameKitSavedGameConflicts = [[NSMutableDictionary alloc] init];
+    return bmxGameKitSavedGameConflicts;
+}
+
+static void ResetSavedGameCaches(void) {
+    [bmxGameKitSavedGames removeAllObjects];
+    [bmxGameKitSavedGameConflicts removeAllObjects];
+}
+
+static int NextPositiveHandle(int *value) {
+    int result = *value;
+    *value += 1;
+    if (*value <= 0) *value = 1;
+    return result;
+}
+
+static int StoreSavedGame(GKSavedGame *savedGame) {
+    if (!savedGame) return 0;
+    int handle = NextPositiveHandle(&bmxGameKitNextSavedGameHandle);
+    SavedGameCache()[@(handle)] = savedGame;
+    return handle;
 }
 
 static NSString *NSStringFromBBString(BBString *value) {
@@ -67,6 +108,11 @@ static BBString *BBStringFromNSString(NSString *value) {
 static BBArray *BBByteArrayFromNSData(NSData *data) {
     if (!data.length) return &bbEmptyArray;
     return bbArrayFromData("b", (int)data.length, (void *)data.bytes);
+}
+
+static NSData *NSDataFromBBByteArray(BBArray *data) {
+    if (!data || data == &bbEmptyArray || data->scales[0] <= 0) return [NSData data];
+    return [NSData dataWithBytes:BBARRAYDATA(data, 1) length:(NSUInteger)data->scales[0]];
 }
 
 #if TARGET_OS_IPHONE
@@ -120,7 +166,11 @@ static void NotifyAuthentication(NSError *error) {
     if (!bmxGameKitService) return;
     GKLocalPlayer *player = GKLocalPlayer.localPlayer;
     BOOL authenticated = player.isAuthenticated;
+    NSString *playerID = authenticated ? player.gamePlayerID : nil;
+    BOOL accountChanged = ![bmxGameKitAuthenticatedPlayerID isEqualToString:playerID];
+    bmxGameKitAuthenticatedPlayerID = [playerID copy];
     ResetPlayerCache();
+    if (accountChanged) ResetSavedGameCaches();
     BBString *domain;
     BBString *message;
     int code;
@@ -220,6 +270,54 @@ static void CompleteResourceImage(int requestId, int kind, NSString *identifier,
     }, error);
 }
 
+static void SendSavedGameList(int operation, int identifier, int conflictId, NSArray<GKSavedGame *> *savedGames, NSError *error) {
+    DispatchMain(^{
+        if (!bmxGameKitService) return;
+        NSArray<GKSavedGame *> *values = savedGames ?: @[];
+        apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameListBegin(
+            bmxGameKitService, operation, identifier, (int)values.count);
+        for (GKSavedGame *savedGame in values) {
+            int handle = StoreSavedGame(savedGame);
+            apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameListItem(
+                bmxGameKitService, operation, identifier, handle,
+                BBStringFromNSString(savedGame.name), BBStringFromNSString(savedGame.deviceName),
+                savedGame.modificationDate.timeIntervalSince1970);
+        }
+        CompleteSimple(^(BBString *domain, int code, BBString *message) {
+            apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameListComplete(
+                bmxGameKitService, operation, identifier, conflictId, domain, code, message);
+        }, error);
+    });
+}
+
+@interface BMXGameKitLocalPlayerListener : NSObject <GKLocalPlayerListener>
+@end
+
+@implementation BMXGameKitLocalPlayerListener
+
+- (void)player:(GKPlayer *)player didModifySavedGame:(GKSavedGame *)savedGame {
+    DispatchMain(^{
+        if (!bmxGameKitService || !savedGame) return;
+        int handle = StoreSavedGame(savedGame);
+        apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameModified(
+            bmxGameKitService, handle, BBStringFromNSString(savedGame.name),
+            BBStringFromNSString(savedGame.deviceName), savedGame.modificationDate.timeIntervalSince1970);
+    });
+}
+
+- (void)player:(GKPlayer *)player hasConflictingSavedGames:(NSArray<GKSavedGame *> *)savedGames {
+    DispatchMain(^{
+        if (!bmxGameKitService) return;
+        int conflictId = NextPositiveHandle(&bmxGameKitNextConflictHandle);
+        SavedGameConflictCache()[@(conflictId)] = [savedGames copy];
+        SendSavedGameList(2, conflictId, conflictId, savedGames, nil);
+    });
+}
+
+@end
+
+static BMXGameKitLocalPlayerListener *bmxGameKitLocalPlayerListener = nil;
+
 void bmx_gamekit_start(BBObject *service) {
     DispatchMain(^{
         if (bmxGameKitService != service) {
@@ -227,6 +325,8 @@ void bmx_gamekit_start(BBObject *service) {
             bmxGameKitService = service;
             BBRETAIN(bmxGameKitService);
         }
+        if (!bmxGameKitLocalPlayerListener) bmxGameKitLocalPlayerListener = [[BMXGameKitLocalPlayerListener alloc] init];
+        [GKLocalPlayer.localPlayer registerListener:bmxGameKitLocalPlayerListener];
         GKLocalPlayer.localPlayer.authenticateHandler = ^(id controller, NSError *error) {
             DispatchMain(^{
                 if (controller) PresentAuthenticationController(controller);
@@ -239,7 +339,10 @@ void bmx_gamekit_start(BBObject *service) {
 void bmx_gamekit_stop(void) {
     DispatchMain(^{
         GKLocalPlayer.localPlayer.authenticateHandler = nil;
+        if (bmxGameKitLocalPlayerListener) [GKLocalPlayer.localPlayer unregisterListener:bmxGameKitLocalPlayerListener];
         [bmxGameKitPlayers removeAllObjects];
+        ResetSavedGameCaches();
+        bmxGameKitAuthenticatedPlayerID = nil;
         if (@available(iOS 14.0, macOS 11.0, *)) {
             GKAccessPoint.shared.active = NO;
         }
@@ -339,6 +442,111 @@ void bmx_gamekit_load_player_photo(int requestId, BBString *identifierValue, int
         }
         CompletePlayerPhoto(requestId, identifier, size, nil,
             ModuleError(-3, @"The requested player is not available in this Game Center session."));
+    });
+}
+
+void bmx_gamekit_fetch_saved_games(int requestId) {
+    DispatchMain(^{
+        [GKLocalPlayer.localPlayer fetchSavedGamesWithCompletionHandler:^(NSArray<GKSavedGame *> *savedGames, NSError *error) {
+            SendSavedGameList(0, requestId, 0, savedGames, error);
+        }];
+    });
+}
+
+void bmx_gamekit_save_game(int requestId, BBString *nameValue, BBArray *dataValue) {
+    NSString *name = NSStringFromBBString(nameValue);
+    NSData *data = NSDataFromBBByteArray(dataValue);
+    DispatchMain(^{
+        if (!name.length) {
+            NSError *error = ModuleError(-2, @"A saved-game name is required.");
+            CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameSaved(
+                    bmxGameKitService, requestId, 0, &bbEmptyString, &bbEmptyString, 0.0, domain, code, message);
+            }, error);
+            return;
+        }
+        [GKLocalPlayer.localPlayer saveGameData:data withName:name completionHandler:^(GKSavedGame *savedGame, NSError *error) {
+            DispatchMain(^{
+                if (!bmxGameKitService) return;
+                int handle = StoreSavedGame(savedGame);
+                CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                    apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameSaved(
+                        bmxGameKitService, requestId, handle, BBStringFromNSString(savedGame.name),
+                        BBStringFromNSString(savedGame.deviceName), savedGame.modificationDate.timeIntervalSince1970,
+                        domain, code, message);
+                }, error);
+            });
+        }];
+    });
+}
+
+void bmx_gamekit_load_saved_game(int requestId, int handle) {
+    DispatchMain(^{
+        GKSavedGame *savedGame = bmxGameKitSavedGames[@(handle)];
+        if (!savedGame) {
+            NSError *error = ModuleError(-3, @"The requested saved game is not available in this Game Center session.");
+            CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameDataLoaded(
+                    bmxGameKitService, requestId, handle, &bbEmptyArray, domain, code, message);
+            }, error);
+            return;
+        }
+        [savedGame loadDataWithCompletionHandler:^(NSData *data, NSError *error) {
+            DispatchMain(^{
+                if (!bmxGameKitService) return;
+                CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                    apple_gamekit_gamekit_apple_TGameCenter__OnSavedGameDataLoaded(
+                        bmxGameKitService, requestId, handle, BBByteArrayFromNSData(data), domain, code, message);
+                }, error);
+            });
+        }];
+    });
+}
+
+void bmx_gamekit_delete_saved_games(int requestId, BBString *nameValue) {
+    NSString *name = NSStringFromBBString(nameValue);
+    DispatchMain(^{
+        if (!name.length) {
+            NSError *error = ModuleError(-2, @"A saved-game name is required.");
+            CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                apple_gamekit_gamekit_apple_TGameCenter__OnSavedGamesDeleted(
+                    bmxGameKitService, requestId, BBStringFromNSString(name), domain, code, message);
+            }, error);
+            return;
+        }
+        [GKLocalPlayer.localPlayer deleteSavedGamesWithName:name completionHandler:^(NSError *error) {
+            DispatchMain(^{
+                if (!bmxGameKitService) return;
+                if (!error) {
+                    NSArray<NSNumber *> *handles = [bmxGameKitSavedGames keysOfEntriesPassingTest:^BOOL(NSNumber *key, GKSavedGame *savedGame, BOOL *stop) {
+                        return [savedGame.name isEqualToString:name];
+                    }].allObjects;
+                    [bmxGameKitSavedGames removeObjectsForKeys:handles];
+                }
+                CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                    apple_gamekit_gamekit_apple_TGameCenter__OnSavedGamesDeleted(
+                        bmxGameKitService, requestId, BBStringFromNSString(name), domain, code, message);
+                }, error);
+            });
+        }];
+    });
+}
+
+void bmx_gamekit_resolve_saved_game_conflict(int requestId, int conflictId, BBArray *dataValue) {
+    NSData *data = NSDataFromBBByteArray(dataValue);
+    DispatchMain(^{
+        NSArray<GKSavedGame *> *conflicts = bmxGameKitSavedGameConflicts[@(conflictId)];
+        if (!conflicts.count) {
+            SendSavedGameList(1, requestId, conflictId, nil,
+                ModuleError(-3, @"The saved-game conflict is no longer available in this Game Center session."));
+            return;
+        }
+        [GKLocalPlayer.localPlayer resolveConflictingSavedGames:conflicts withData:data completionHandler:^(NSArray<GKSavedGame *> *savedGames, NSError *error) {
+            DispatchMain(^{
+                if (!error) [bmxGameKitSavedGameConflicts removeObjectForKey:@(conflictId)];
+                SendSavedGameList(1, requestId, conflictId, savedGames, error);
+            });
+        }];
     });
 }
 

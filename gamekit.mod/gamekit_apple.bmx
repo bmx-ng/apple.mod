@@ -149,6 +149,33 @@ Type TGameCenterPlayerResult
 End Type
 
 Rem
+bbdoc: Metadata for one version of a Game Center saved game.
+about: Saved-game objects are valid for the current authenticated Game Center session. Use the object with #TGameCenter.LoadSavedGame rather than retaining it across application launches or account changes.
+End Rem
+Type TGameCenterSavedGame
+	Field name:String
+	Field deviceName:String
+	Field modificationTime:Double
+	Field _handle:Int
+
+	Function _Create:TGameCenterSavedGame(handle:Int, name:String, deviceName:String, modificationTime:Double)
+		Local savedGame:TGameCenterSavedGame = New TGameCenterSavedGame
+		savedGame._handle = handle
+		savedGame.name = name
+		savedGame.deviceName = deviceName
+		savedGame.modificationTime = modificationTime
+		Return savedGame
+	End Function
+End Type
+
+Rem
+bbdoc: Saved-game versions returned by GameKit.
+End Rem
+Type TGameCenterSavedGameResult
+	Field savedGames:TGameCenterSavedGame[]
+End Type
+
+Rem
 bbdoc: Progress for one Game Center achievement.
 End Rem
 Type TGameCenterAchievement
@@ -344,6 +371,20 @@ Interface IGameCenterPlayerListener
 	Method OnGameCenterPlayerPhotoLoaded(requestId:Int, gamePlayerId:String, size:EGameCenterPhotoSize, pngData:Byte[], error:TGameCenterError)
 End Interface
 
+Rem
+bbdoc: Optional listener for Game Center saved-game operations and iCloud change events.
+about: Saved games require the iCloud capability with iCloud Documents enabled. Conflict and modification callbacks are unsolicited events and therefore do not have request identifiers.
+End Rem
+Interface IGameCenterSavedGameListener
+	Method OnGameCenterSavedGamesFetched(requestId:Int, result:TGameCenterSavedGameResult, error:TGameCenterError)
+	Method OnGameCenterSavedGameSaved(requestId:Int, savedGame:TGameCenterSavedGame, error:TGameCenterError)
+	Method OnGameCenterSavedGameDataLoaded(requestId:Int, savedGame:TGameCenterSavedGame, data:Byte[], error:TGameCenterError)
+	Method OnGameCenterSavedGamesDeleted(requestId:Int, name:String, error:TGameCenterError)
+	Method OnGameCenterSavedGameConflict(conflictId:Int, result:TGameCenterSavedGameResult)
+	Method OnGameCenterSavedGameConflictResolved(requestId:Int, conflictId:Int, result:TGameCenterSavedGameResult, error:TGameCenterError)
+	Method OnGameCenterSavedGameModified(savedGame:TGameCenterSavedGame)
+End Interface
+
 Private
 
 Type TAchievementLoad
@@ -378,6 +419,11 @@ Type TPlayerLoad
 	Field index:Int
 End Type
 
+Type TSavedGameLoad
+	Field values:TGameCenterSavedGame[]
+	Field index:Int
+End Type
+
 Public
 
 Rem
@@ -395,6 +441,8 @@ Type TGameCenter
 	Field leaderboardInfoLoads:TMap = New TMap
 	Field leaderboardSetLoads:TMap = New TMap
 	Field playerLoads:TMap = New TMap
+	Field savedGameLoads:TMap = New TMap
+	Field savedGames:TMap = New TMap
 
 	Rem
 	bbdoc: Returns the process-wide Game Center service.
@@ -431,6 +479,8 @@ Type TGameCenter
 		leaderboardInfoLoads.Clear()
 		leaderboardSetLoads.Clear()
 		playerLoads.Clear()
+		savedGameLoads.Clear()
+		savedGames.Clear()
 	End Method
 
 	Rem
@@ -615,6 +665,60 @@ Type TGameCenter
 	End Method
 
 	Rem
+	bbdoc: Fetches metadata for every saved game available to the local player.
+	returns: A request identifier supplied to #IGameCenterSavedGameListener.
+	End Rem
+	Method FetchSavedGames:Int()
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_fetch_saved_games(requestId)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Saves arbitrary game data to the local player's iCloud account.
+	about: Saving with an existing name replaces the current version from this device. Keep the data compact and encode its format and schema version within the byte array.
+	returns: A request identifier supplied to #IGameCenterSavedGameListener.
+	End Rem
+	Method SaveGame:Int(name:String, data:Byte[])
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_save_game(requestId, name, data)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Loads the bytes stored in a saved-game version returned during the current session.
+	returns: A request identifier supplied to #IGameCenterSavedGameListener.
+	End Rem
+	Method LoadSavedGame:Int(savedGame:TGameCenterSavedGame)
+		Local requestId:Int = NextRequest()
+		Local handle:Int
+		If savedGame Then handle = savedGame._handle
+		bmx_gamekit_load_saved_game(requestId, handle)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Deletes every saved-game version with the supplied name.
+	returns: A request identifier supplied to #IGameCenterSavedGameListener.
+	End Rem
+	Method DeleteSavedGames:Int(name:String)
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_delete_saved_games(requestId, name)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Replaces all versions in a conflict reported by #IGameCenterSavedGameListener with the supplied data.
+	about: A conflict identifier is valid only for the current authenticated Game Center session. The application should load and compare the conflicting versions before choosing or merging their data.
+	returns: A request identifier supplied to #IGameCenterSavedGameListener.
+	End Rem
+	Method ResolveSavedGameConflict:Int(conflictId:Int, data:Byte[])
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_resolve_saved_game_conflict(requestId, conflictId, data)
+		Return requestId
+	End Method
+
+	Rem
 	bbdoc: Loads a ranked range from a leaderboard.
 	about: startRank is one based and count is limited to 100 by GameKit.
 	returns: A request identifier supplied to the listener callback.
@@ -635,6 +739,11 @@ Type TGameCenter
 	End Method
 
 	Function _OnAuthenticationChanged(service:TGameCenter, authenticated:Int, gamePlayerId:String, teamPlayerId:String, alias:String, displayName:String, underage:Int, multiplayerRestricted:Int, personalizedCommunicationRestricted:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local accountChanged:Int = Not authenticated Or Not service.localPlayer Or service.localPlayer.gamePlayerId <> gamePlayerId
+		If accountChanged Then
+			service.savedGameLoads.Clear()
+			service.savedGames.Clear()
+		End If
 		Local player:TGameCenterPlayer
 		If authenticated Then
 			player = TGameCenterPlayer._Create(gamePlayerId, teamPlayerId, alias, displayName, underage, multiplayerRestricted, personalizedCommunicationRestricted)
@@ -841,6 +950,75 @@ Type TGameCenter
 		If playerListener Then playerListener.OnGameCenterPlayerPhotoLoaded(requestId, gamePlayerId, size, pngData, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
 	End Function
 
+	Function _SavedGameLoadKey:String(operation:Int, identifier:Int)
+		Return operation + ":" + identifier
+	End Function
+
+	Function _OnSavedGameListBegin(service:TGameCenter, operation:Int, identifier:Int, count:Int) { nomangle }
+		Local load:TSavedGameLoad = New TSavedGameLoad
+		load.values = New TGameCenterSavedGame[count]
+		service.savedGameLoads.Insert(_SavedGameLoadKey(operation, identifier), load)
+	End Function
+
+	Function _OnSavedGameListItem(service:TGameCenter, operation:Int, identifier:Int, handle:Int, name:String, deviceName:String, modificationTime:Double) { nomangle }
+		Local savedGame:TGameCenterSavedGame = TGameCenterSavedGame._Create(handle, name, deviceName, modificationTime)
+		service.savedGames.Insert(String.FromInt(handle), savedGame)
+		Local load:TSavedGameLoad = TSavedGameLoad(service.savedGameLoads.ValueForKey(_SavedGameLoadKey(operation, identifier)))
+		If load And load.index < load.values.length Then
+			load.values[load.index] = savedGame
+			load.index :+ 1
+		End If
+	End Function
+
+	Function _OnSavedGameListComplete(service:TGameCenter, operation:Int, identifier:Int, conflictId:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local key:String = _SavedGameLoadKey(operation, identifier)
+		Local load:TSavedGameLoad = TSavedGameLoad(service.savedGameLoads.ValueForKey(key))
+		service.savedGameLoads.Remove(key)
+		Local result:TGameCenterSavedGameResult
+		If load Then
+			result = New TGameCenterSavedGameResult
+			result.savedGames = load.values
+		End If
+		Local savedGameListener:IGameCenterSavedGameListener = IGameCenterSavedGameListener(service.listener)
+		If Not savedGameListener Then Return
+		Select operation
+			Case 0
+				savedGameListener.OnGameCenterSavedGamesFetched(identifier, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+			Case 1
+				savedGameListener.OnGameCenterSavedGameConflictResolved(identifier, conflictId, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+			Case 2
+				savedGameListener.OnGameCenterSavedGameConflict(conflictId, result)
+		End Select
+	End Function
+
+	Function _OnSavedGameSaved(service:TGameCenter, requestId:Int, handle:Int, name:String, deviceName:String, modificationTime:Double, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local savedGame:TGameCenterSavedGame
+		If handle Then
+			savedGame = TGameCenterSavedGame._Create(handle, name, deviceName, modificationTime)
+			service.savedGames.Insert(String.FromInt(handle), savedGame)
+		End If
+		Local savedGameListener:IGameCenterSavedGameListener = IGameCenterSavedGameListener(service.listener)
+		If savedGameListener Then savedGameListener.OnGameCenterSavedGameSaved(requestId, savedGame, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnSavedGameDataLoaded(service:TGameCenter, requestId:Int, handle:Int, data:Byte[], errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local savedGame:TGameCenterSavedGame = TGameCenterSavedGame(service.savedGames.ValueForKey(String.FromInt(handle)))
+		Local savedGameListener:IGameCenterSavedGameListener = IGameCenterSavedGameListener(service.listener)
+		If savedGameListener Then savedGameListener.OnGameCenterSavedGameDataLoaded(requestId, savedGame, data, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnSavedGamesDeleted(service:TGameCenter, requestId:Int, name:String, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local savedGameListener:IGameCenterSavedGameListener = IGameCenterSavedGameListener(service.listener)
+		If savedGameListener Then savedGameListener.OnGameCenterSavedGamesDeleted(requestId, name, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnSavedGameModified(service:TGameCenter, handle:Int, name:String, deviceName:String, modificationTime:Double) { nomangle }
+		Local savedGame:TGameCenterSavedGame = TGameCenterSavedGame._Create(handle, name, deviceName, modificationTime)
+		service.savedGames.Insert(String.FromInt(handle), savedGame)
+		Local savedGameListener:IGameCenterSavedGameListener = IGameCenterSavedGameListener(service.listener)
+		If savedGameListener Then savedGameListener.OnGameCenterSavedGameModified(savedGame)
+	End Function
+
 	Function _OnViewDismissed(service:TGameCenter, view:EGameCenterView) { nomangle }
 		If service.listener Then service.listener.OnGameCenterViewDismissed(view)
 	End Function
@@ -872,4 +1050,9 @@ Extern
 	Function bmx_gamekit_load_friends_authorization(requestId:Int)
 	Function bmx_gamekit_load_friends(requestId:Int)
 	Function bmx_gamekit_load_player_photo(requestId:Int, gamePlayerId:String, size:EGameCenterPhotoSize)
+	Function bmx_gamekit_fetch_saved_games(requestId:Int)
+	Function bmx_gamekit_save_game(requestId:Int, name:String, data:Byte[])
+	Function bmx_gamekit_load_saved_game(requestId:Int, handle:Int)
+	Function bmx_gamekit_delete_saved_games(requestId:Int, name:String)
+	Function bmx_gamekit_resolve_saved_game_conflict(requestId:Int, conflictId:Int, data:Byte[])
 End Extern

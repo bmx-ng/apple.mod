@@ -138,6 +138,7 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 End Type
 
 Graphics SCREEN_WIDTH, SCREEN_HEIGHT
+SetVirtualResolution SCREEN_WIDTH, SCREEN_HEIGHT, VIRTUAL_LETTERBOX
 SetClsColor 12, 18, 30
 
 Local gameCenter:TGameCenter = TGameCenter.Shared()
@@ -158,8 +159,11 @@ While Not AppTerminate()
 	SetColor 255, 255, 255
 	DrawText "Open Game Center", 90, 270
 
-	If MouseHit(1) And MouseX() >= 60 And MouseX() < 360 And MouseY() >= 250 And MouseY() < 310 Then
-		gameCenter.ShowGameCenter(EGameCenterView.Dashboard)
+	If MouseHit(1) Then
+		Local mouseX:Float, mouseY:Float
+		If GetVirtualMouse(mouseX, mouseY, True) And mouseX >= 60 And mouseX < 360 And mouseY >= 250 And mouseY < 310 Then
+			gameCenter.ShowGameCenter(EGameCenterView.Dashboard)
+		End If
 	End If
 	Flip
 Wend
