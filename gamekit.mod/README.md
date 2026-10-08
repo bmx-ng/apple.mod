@@ -29,6 +29,9 @@ Keep the entitlement plist with the application sources and set
 `ios.entitlements` in the application's `.settings` file. bmk copies it into
 the generated project and reconnects it on every build, so capabilities do not
 need to be re-added after regeneration. The examples demonstrate this setup.
+Their `com.example` bundle and iCloud container identifiers are placeholders;
+replace them with identifiers registered to your Apple Developer account before
+building for a device or using Game Center services.
 
 Call `TGameCenter.Shared().Start(listener)` near application startup. GameKit
 may invoke the authentication callback more than once as the player's account
