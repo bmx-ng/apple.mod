@@ -120,7 +120,7 @@ SetClsColor 12, 18, 30
 Local gameCenter:TGameCenter = TGameCenter.Shared()
 Local listener:TListener = New TListener
 gameCenter.Start(listener)
-gameCenter.SetAccessPointActive(True, EGameCenterAccessPointLocation.TopLeading)
+gameCenter.ShowAccessPoint(EGameCenterAccessPointLocation.TopLeading)
 
 While Not AppTerminate()
 	Cls
@@ -129,12 +129,13 @@ While Not AppTerminate()
 	DrawText statusText, 60, 115
 	DrawText detailText, 60, 145
 	DrawText errorText, 60, 175
+	DrawText "Access point active: " + gameCenter.IsAccessPointActive() + "  visible: " + gameCenter.IsAccessPointVisible(), 60, 195
 	SetColor 55, 155, 235
-	DrawRect 60, 210, 300, 60
+	DrawRect 60, 250, 300, 60
 	SetColor 255, 255, 255
-	DrawText "Open Game Center", 90, 230
+	DrawText "Open Game Center", 90, 270
 
-	If MouseHit(1) And MouseX() >= 60 And MouseX() < 360 And MouseY() >= 210 And MouseY() < 270 Then
+	If MouseHit(1) And MouseX() >= 60 And MouseX() < 360 And MouseY() >= 250 And MouseY() < 310 Then
 		gameCenter.ShowGameCenter(EGameCenterView.Dashboard)
 	End If
 	Flip

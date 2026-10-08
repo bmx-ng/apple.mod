@@ -412,6 +412,43 @@ Type TGameCenter
 	End Method
 
 	Rem
+	bbdoc: Shows Apple's Game Center access point at the requested screen location.
+	End Rem
+	Method ShowAccessPoint(location:EGameCenterAccessPointLocation = EGameCenterAccessPointLocation.TopLeading)
+		SetAccessPointActive(True, location)
+	End Method
+
+	Rem
+	bbdoc: Hides Apple's Game Center access point.
+	about: Games that only show the access point on menus should call this again when resuming gameplay so a reconnect banner cannot leave the widget visible.
+	End Rem
+	Method HideAccessPoint()
+		SetAccessPointActive(False)
+	End Method
+
+	Rem
+	bbdoc: Returns #True when the game has requested that the access point be active.
+	End Rem
+	Method IsAccessPointActive:Int()
+		Return bmx_gamekit_is_access_point_active()
+	End Method
+
+	Rem
+	bbdoc: Returns #True when the access point is currently visible on screen.
+	about: Visibility can temporarily differ from #IsAccessPointActive while Game Center displays a banner or dashboard.
+	End Rem
+	Method IsAccessPointVisible:Int()
+		Return bmx_gamekit_is_access_point_visible()
+	End Method
+
+	Rem
+	bbdoc: Returns #True while the access point is presenting Game Center UI.
+	End Rem
+	Method IsPresentingGameCenter:Int()
+		Return bmx_gamekit_is_presenting()
+	End Method
+
+	Rem
 	bbdoc: Opens Game Center at a particular section through the access point.
 	End Rem
 	Method ShowGameCenter(view:EGameCenterView = EGameCenterView.Default)
@@ -704,6 +741,9 @@ Extern
 	Function bmx_gamekit_is_available:Int()
 	Function bmx_gamekit_is_authenticated:Int()
 	Function bmx_gamekit_set_access_point_active(active:Int, location:EGameCenterAccessPointLocation)
+	Function bmx_gamekit_is_access_point_active:Int()
+	Function bmx_gamekit_is_access_point_visible:Int()
+	Function bmx_gamekit_is_presenting:Int()
 	Function bmx_gamekit_show(view:EGameCenterView)
 	Function bmx_gamekit_report_achievement(requestId:Int, identifier:String, percentComplete:Double, showCompletionBanner:Int)
 	Function bmx_gamekit_load_achievements(requestId:Int)

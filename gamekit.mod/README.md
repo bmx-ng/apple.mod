@@ -38,6 +38,13 @@ achievement descriptions, leaderboard metadata, leaderboard sets and PNG
 artwork. Keeping the metadata listener optional allows existing listeners to
 continue using only the core API.
 
+`ShowAccessPoint()` and `HideAccessPoint()` explicitly control Apple's floating
+Game Center widget. `IsAccessPointActive()` reports the requested state,
+`IsAccessPointVisible()` reports whether it is actually on screen, and
+`IsPresentingGameCenter()` reports whether it currently has Game Center UI
+open. A game that only uses the widget on menus should reapply
+`HideAccessPoint()` when gameplay resumes after an interruption.
+
 Use `LoadAchievementDescriptions()` to retrieve localized achievement titles,
 descriptions, point values and visibility. `LoadLeaderboards()` returns both
 classic and recurring leaderboards; pass a leaderboard-set identifier to

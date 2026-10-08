@@ -250,6 +250,21 @@ void bmx_gamekit_set_access_point_active(int active, int location) {
     });
 }
 
+int bmx_gamekit_is_access_point_active(void) {
+    if (@available(iOS 14.0, macOS 11.0, *)) return GKAccessPoint.shared.isActive;
+    return 0;
+}
+
+int bmx_gamekit_is_access_point_visible(void) {
+    if (@available(iOS 14.0, macOS 11.0, *)) return GKAccessPoint.shared.isVisible;
+    return 0;
+}
+
+int bmx_gamekit_is_presenting(void) {
+    if (@available(iOS 14.0, macOS 11.0, *)) return GKAccessPoint.shared.isPresentingGameCenter;
+    return 0;
+}
+
 void bmx_gamekit_show(int view) {
     DispatchMain(^{
         if (!bmxGameKitService) return;
