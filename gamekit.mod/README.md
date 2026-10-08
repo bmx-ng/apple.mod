@@ -25,8 +25,10 @@ application to be configured for Game Center:
    signed `com.apple.developer.game-center` entitlement.
 4. Define any achievement and leaderboard identifiers in App Store Connect.
 
-The generated BlitzMax Xcode project does not yet preserve capabilities across
-a rebuild, so step 3 currently needs to be repeated after regenerating it.
+Keep the entitlement plist with the application sources and set
+`ios.entitlements` in the application's `.settings` file. bmk copies it into
+the generated project and reconnects it on every build, so capabilities do not
+need to be re-added after regeneration. The examples demonstrate this setup.
 
 Call `TGameCenter.Shared().Start(listener)` near application startup. GameKit
 may invoke the authentication callback more than once as the player's account
@@ -95,10 +97,10 @@ generated Xcode project:
    remove the `com.apple.developer.game-center` entitlement.
 
 Xcode writes the iCloud container and Cloud Documents entitlements and updates
-the provisioning profile. The player must also be signed into iCloud and have
-iCloud Drive enabled. As noted above, the generated BlitzMax Xcode project does
-not currently preserve target capabilities across regeneration, so recheck
-both Game Center and iCloud after rebuilding the project.
+the provisioning profile. Copy those entries into the source-controlled plist
+named by `ios.entitlements`; the generated copy must not be treated as the
+authoritative file. The player must also be signed into iCloud and have iCloud
+Drive enabled.
 
 `deviceName` may be a generic device description. Access to a person's custom
 device name requires Apple's separately controlled user-assigned-device-name

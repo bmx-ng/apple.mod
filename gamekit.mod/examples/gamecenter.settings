@@ -4,3 +4,4 @@ app.version.name=1.0.0
 app.version.code=1
 app.orientation=landscape
 ios.deployment.target=14.0
+ios.entitlements=gamecenter.entitlements
