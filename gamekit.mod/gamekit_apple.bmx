@@ -1,5 +1,17 @@
 SuperStrict
 
+ModuleInfo "CC_OPTS: -fobjc-arc"
+
+Import "-framework Foundation"
+Import "-framework GameKit"
+Import "glue.m"
+
+?ios
+Import "-framework UIKit"
+?Not ios
+Import "-framework AppKit"
+?
+
 Import BRL.Map
 
 Rem
