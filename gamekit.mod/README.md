@@ -39,9 +39,24 @@ returned duration components as configured choices rather than exact elapsed
 seconds.
 
 Challenge invitations and discovery are managed by the Games app and Game
-Center. Routing a player directly to relevant game content after they select a
-challenge requires GameKit activity/deep-link handling, which is a separate
-integration from challenge metadata and score reporting.
+Center. `ShowChallenges()` opens Apple's challenge browser, while
+`CreateChallenge(identifier)` opens the system creation and friend-invitation
+interface for one definition. Both report dismissal through
+`OnGameCenterChallengeViewDismissed()`; the game never needs to implement its
+own friend picker or challenge notification service.
+
+Associate the challenge leaderboard with a GameKit activity when a challenge
+notification should open a particular level or mode. Implement
+`IGameCenterActivityListener` and route `TGameCenterActivity.definitionIdentifier`
+in `OnGameCenterWantsToPlayActivity()`. Return `True` after accepting the event,
+or `False` when the game cannot handle that activity definition. The activity's
+custom string properties, lifecycle state, dates and optional party code are
+also available. Call `Start()` as early as practical so this works for both cold
+and warm launches. `CheckPendingGameActivity()` can be used during startup to
+prepare the application before Game Center delivers the activity event.
+
+Game Center sends and displays the challenge notification. No custom push
+server or additional push-notification entitlement is needed for this flow.
 
 ## Application setup
 

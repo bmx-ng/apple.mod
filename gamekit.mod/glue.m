@@ -35,6 +35,11 @@ extern void apple_gamekit_gamekit_apple_TGameCenter__OnChallengeDefinitionLoaded
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnChallengeDurationLoaded(BBObject *, int, int, int, int, int, int, int, int, int, int);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnChallengeDefinitionLoadComplete(BBObject *, int, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnChallengeActiveStatusLoaded(BBObject *, int, BBString *, int, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnChallengeViewDismissed(BBObject *, int, BBString *, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnPendingGameActivityChecked(BBObject *, int, int, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnGameActivityBegin(BBObject *, BBString *, BBString *, BBString *, BBString *, BBString *, BBString *, BBString *, BBString *, int, double, double, double, double, double);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnGameActivityProperty(BBObject *, BBString *, BBString *);
+extern int apple_gamekit_gamekit_apple_TGameCenter__OnGameActivityReady(BBObject *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnResourceImageLoaded(BBObject *, int, int, BBString *, BBArray *, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnFriendsAuthorizationLoaded(BBObject *, int, int, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnFriendsLoadBegin(BBObject *, int, int);
@@ -357,6 +362,32 @@ static void SendSavedGameList(int operation, int identifier, int conflictId, NSA
 @end
 
 @implementation BMXGameKitLocalPlayerListener
+
+- (void)player:(GKPlayer *)player wantsToPlayGameActivity:(GKGameActivity *)activity completionHandler:(void (^)(BOOL handled))completionHandler API_AVAILABLE(ios(26.0), macos(26.0)) {
+    DispatchMain(^{
+        if (!bmxGameKitService || !activity) {
+            completionHandler(NO);
+            return;
+        }
+        if (player.gamePlayerID.length) PlayerCache()[player.gamePlayerID] = player;
+        if (player.teamPlayerID.length) PlayerCache()[player.teamPlayerID] = player;
+        apple_gamekit_gamekit_apple_TGameCenter__OnGameActivityBegin(
+            bmxGameKitService,
+            BBStringFromNSString(player.gamePlayerID), BBStringFromNSString(player.teamPlayerID),
+            BBStringFromNSString(player.alias), BBStringFromNSString(player.displayName),
+            BBStringFromNSString(activity.identifier),
+            BBStringFromNSString(activity.activityDefinition.identifier),
+            BBStringFromNSString(activity.partyCode), BBStringFromNSString(activity.partyURL.absoluteString),
+            (int)activity.state, activity.creationDate.timeIntervalSince1970,
+            activity.startDate.timeIntervalSince1970, activity.lastResumeDate.timeIntervalSince1970,
+            activity.endDate.timeIntervalSince1970, activity.duration);
+        [activity.properties enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *value, BOOL *stop) {
+            apple_gamekit_gamekit_apple_TGameCenter__OnGameActivityProperty(
+                bmxGameKitService, BBStringFromNSString(key), BBStringFromNSString(value));
+        }];
+        completionHandler(apple_gamekit_gamekit_apple_TGameCenter__OnGameActivityReady(bmxGameKitService) != 0);
+    });
+}
 
 - (void)player:(GKPlayer *)player didModifySavedGame:(GKSavedGame *)savedGame {
     DispatchMain(^{
@@ -986,6 +1017,64 @@ void bmx_gamekit_load_challenge_active_status(int requestId, BBString *identifie
             }];
         } else {
             CompleteChallengeActiveStatus(requestId, identifier, NO, ModuleError(-1, @"Challenges require iOS 26 or macOS 26."));
+        }
+    });
+}
+
+void bmx_gamekit_show_challenges(int requestId, BBString *identifierValue) {
+    NSString *identifier = NSStringFromBBString(identifierValue);
+    DispatchMain(^{
+        if (!bmxGameKitService) return;
+        if (@available(iOS 26.0, macOS 26.0, *)) {
+            GKAccessPoint *accessPoint = GKAccessPoint.shared;
+#if TARGET_OS_IPHONE
+            accessPoint.parentWindow = ActiveWindow();
+#else
+            accessPoint.parentWindow = NSApp.keyWindow ?: NSApp.mainWindow;
+#endif
+            void (^finished)(void) = ^{
+                DispatchMain(^{
+                    if (bmxGameKitService) {
+                        apple_gamekit_gamekit_apple_TGameCenter__OnChallengeViewDismissed(
+                            bmxGameKitService, requestId, BBStringFromNSString(identifier),
+                            &bbEmptyString, 0, &bbEmptyString);
+                    }
+                });
+            };
+            if (identifier.length) {
+                [accessPoint triggerAccessPointWithChallengeDefinitionID:identifier handler:finished];
+            } else {
+                [accessPoint triggerAccessPointForChallengesWithHandler:finished];
+            }
+        } else {
+            NSError *error = ModuleError(-1, @"Challenges require iOS 26 or macOS 26.");
+            CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                apple_gamekit_gamekit_apple_TGameCenter__OnChallengeViewDismissed(
+                    bmxGameKitService, requestId, BBStringFromNSString(identifier), domain, code, message);
+            }, error);
+        }
+    });
+}
+
+void bmx_gamekit_check_pending_activity(int requestId) {
+    DispatchMain(^{
+        if (!bmxGameKitService) return;
+        if (@available(iOS 26.0, macOS 26.0, *)) {
+            [GKGameActivity checkPendingGameActivityExistenceWithCompletionHandler:^(BOOL hasPendingActivity) {
+                DispatchMain(^{
+                    if (bmxGameKitService) {
+                        apple_gamekit_gamekit_apple_TGameCenter__OnPendingGameActivityChecked(
+                            bmxGameKitService, requestId, hasPendingActivity,
+                            &bbEmptyString, 0, &bbEmptyString);
+                    }
+                });
+            }];
+        } else {
+            NSError *error = ModuleError(-1, @"Game activities require iOS 26 or macOS 26.");
+            CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                apple_gamekit_gamekit_apple_TGameCenter__OnPendingGameActivityChecked(
+                    bmxGameKitService, requestId, 0, domain, code, message);
+            }, error);
         }
     });
 }

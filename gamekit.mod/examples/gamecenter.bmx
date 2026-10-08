@@ -12,6 +12,7 @@ Global statusText:String = "Starting Game Center..."
 Global detailText:String = ""
 Global errorText:String = ""
 Global metadataRequested:Int
+Global firstChallengeId:String
 
 Function ShowError(context:String, error:TGameCenterError)
 	statusText = context
@@ -19,7 +20,7 @@ Function ShowError(context:String, error:TGameCenterError)
 	Print statusText + ": " + errorText
 End Function
 
-Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGameCenterPlayerListener, IGameCenterIdentityListener, IGameCenterChallengeListener
+Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGameCenterPlayerListener, IGameCenterIdentityListener, IGameCenterChallengeListener, IGameCenterActivityListener
 	Method OnGameCenterAuthenticationChanged(authenticated:Int, player:TGameCenterPlayer, error:TGameCenterError)
 		If error Then
 			ShowError("Authentication failed", error)
@@ -157,6 +158,7 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 			statusText = "Loaded " + count + " challenge definitions"
 			If count Then
 				Local definition:TGameCenterChallengeDefinition = result.definitions[0]
+				firstChallengeId = definition.identifier
 				detailText = definition.title + " (" + definition.leaderboardIdentifier + ")"
 				TGameCenter.Shared().LoadChallengeActiveStatus(definition.identifier)
 				TGameCenter.Shared().LoadResourceImage(EGameCenterResourceKind.Challenge, definition.identifier)
@@ -171,6 +173,32 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGam
 			Print "Challenge " + identifier + " has active challenges: " + hasActiveChallenges
 		End If
 	End Method
+
+	Method OnGameCenterChallengeViewDismissed(requestId:Int, identifier:String, error:TGameCenterError)
+		If error Then
+			ShowError("Challenge interface failed", error)
+		Else If identifier Then
+			statusText = "Challenge creation closed: " + identifier
+		Else
+			statusText = "Challenge browser closed"
+		End If
+	End Method
+
+	Method OnGameCenterPendingActivityChecked(requestId:Int, hasPendingActivity:Int, error:TGameCenterError)
+		If error Then
+			ShowError("Pending activity check failed", error)
+		Else
+			Print "Pending Game Center activity: " + hasPendingActivity
+		End If
+	End Method
+
+	Method OnGameCenterWantsToPlayActivity:Int(player:TGameCenterPlayer, activity:TGameCenterActivity)
+		statusText = "Game Center activity selected"
+		detailText = activity.definitionIdentifier
+		Print "Route to activity: " + activity.definitionIdentifier
+		' A real game should switch to the level or mode represented by the definition.
+		Return True
+	End Method
 End Type
 
 Graphics SCREEN_WIDTH, SCREEN_HEIGHT
@@ -181,6 +209,7 @@ Local gameCenter:TGameCenter = TGameCenter.Shared()
 Local listener:TListener = New TListener
 gameCenter.Start(listener)
 gameCenter.ShowAccessPoint(EGameCenterAccessPointLocation.TopLeading)
+If gameCenter.AreChallengesAvailable() Then gameCenter.CheckPendingGameActivity()
 
 While Not AppTerminate()
 	Cls
@@ -193,17 +222,33 @@ While Not AppTerminate()
 	SetColor 55, 155, 235
 	DrawRect 60, 250, 300, 60
 	DrawRect 400, 250, 300, 60
+	DrawRect 60, 330, 300, 60
+	DrawRect 400, 330, 300, 60
 	SetColor 255, 255, 255
 	DrawText "Open Game Center", 90, 270
 	DrawText "Fetch identity payload", 430, 270
+	DrawText "Browse challenges", 90, 350
+	DrawText "Create first challenge", 430, 350
 
 	If MouseHit(1) Then
 		Local mouseX:Float, mouseY:Float
-		If GetVirtualMouse(mouseX, mouseY, True) And mouseY >= 250 And mouseY < 310 Then
-			If mouseX >= 60 And mouseX < 360 Then
-				gameCenter.ShowGameCenter(EGameCenterView.Dashboard)
-			Else If mouseX >= 400 And mouseX < 700 Then
-				gameCenter.FetchIdentityVerification()
+		If GetVirtualMouse(mouseX, mouseY, True) Then
+			If mouseY >= 250 And mouseY < 310 Then
+				If mouseX >= 60 And mouseX < 360 Then
+					gameCenter.ShowGameCenter(EGameCenterView.Dashboard)
+				Else If mouseX >= 400 And mouseX < 700 Then
+					gameCenter.FetchIdentityVerification()
+				End If
+			Else If mouseY >= 330 And mouseY < 390 Then
+				If mouseX >= 60 And mouseX < 360 Then
+					gameCenter.ShowChallenges()
+				Else If mouseX >= 400 And mouseX < 700 Then
+					If firstChallengeId Then
+						gameCenter.CreateChallenge(firstChallengeId)
+					Else
+						statusText = "No challenge definition loaded"
+					End If
+				End If
 			End If
 		End If
 	End If
