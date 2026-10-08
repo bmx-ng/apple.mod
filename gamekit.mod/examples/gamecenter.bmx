@@ -19,7 +19,7 @@ Function ShowError(context:String, error:TGameCenterError)
 	Print statusText + ": " + errorText
 End Function
 
-Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
+Type TListener Implements IGameCenterListener, IGameCenterMetadataListener, IGameCenterPlayerListener
 	Method OnGameCenterAuthenticationChanged(authenticated:Int, player:TGameCenterPlayer, error:TGameCenterError)
 		If error Then
 			ShowError("Authentication failed", error)
@@ -28,6 +28,7 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 			detailText = "Player ID: " + player.gamePlayerId
 			If Not metadataRequested Then
 				metadataRequested = True
+				TGameCenter.Shared().LoadPlayerPhoto(player, EGameCenterPhotoSize.Small)
 				TGameCenter.Shared().LoadAchievementDescriptions()
 				TGameCenter.Shared().LoadLeaderboards()
 				TGameCenter.Shared().LoadLeaderboardSets()
@@ -110,6 +111,28 @@ Type TListener Implements IGameCenterListener, IGameCenterMetadataListener
 			ShowError("Artwork load failed", error)
 		Else
 			statusText = "Loaded " + pngData.length + " bytes of PNG artwork"
+		End If
+	End Method
+
+	Method OnGameCenterFriendsAuthorizationLoaded(requestId:Int, authorization:EGameCenterFriendsAuthorization, error:TGameCenterError)
+		If error Then ShowError("Friends authorization failed", error) Else Print "Friends authorization: " + authorization.Ordinal()
+	End Method
+
+	Method OnGameCenterFriendsLoaded(requestId:Int, result:TGameCenterPlayerResult, error:TGameCenterError)
+		If error Then
+			ShowError("Friends load failed", error)
+		Else
+			Local count:Int
+			If result Then count = result.players.length
+			statusText = "Loaded " + count + " friends"
+		End If
+	End Method
+
+	Method OnGameCenterPlayerPhotoLoaded(requestId:Int, gamePlayerId:String, size:EGameCenterPhotoSize, pngData:Byte[], error:TGameCenterError)
+		If error Then
+			ShowError("Player photo failed", error)
+		Else
+			Print "Loaded " + pngData.length + " bytes of player photo PNG"
 		End If
 	End Method
 End Type

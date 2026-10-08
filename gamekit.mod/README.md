@@ -1,9 +1,9 @@
 # Apple.GameKit
 
 `Apple.GameKit` provides BlitzMax access to Apple's Game Center service on iOS
-and macOS. The API covers local-player authentication, achievements,
-leaderboards, leaderboard sets, resource artwork and the Game Center access
-point.
+and macOS. The API covers local-player authentication, players and friends,
+achievements, leaderboards, leaderboard sets, resource artwork and the Game
+Center access point.
 
 The module contains no public API on non-Apple targets. This allows shared
 projects to import it conditionally without compiling Apple-specific types or
@@ -37,6 +37,30 @@ An object can additionally implement `IGameCenterMetadataListener` to receive
 achievement descriptions, leaderboard metadata, leaderboard sets and PNG
 artwork. Keeping the metadata listener optional allows existing listeners to
 continue using only the core API.
+
+Implement the optional `IGameCenterPlayerListener` for friends and player-photo
+results. `LoadFriendsAuthorizationStatus()` checks the current permission without
+showing a prompt. `LoadFriends()` can show Apple's permission prompt when the
+status is not determined, so call it in response to an explicit menu action.
+GameKit returns only friends who have also allowed this game to access their
+friends list. `LoadPlayerPhoto()` returns small or normal profile artwork as PNG
+bytes for players supplied by Game Center during the current session.
+
+Friend-list access requires a purpose string in the application `Info.plist`:
+
+```xml
+<key>NSGKFriendListUsageDescription</key>
+<string>See which of your Game Center friends also play this game.</string>
+```
+
+Choose wording that accurately describes the game's use of the data. Apple
+requires this key even when only checking the authorization status. Friends
+authorization requires iOS 14.5 or macOS 11.3; the rest of the module retains
+its iOS 14/macOS 11 baseline.
+
+If authorization becomes denied or restricted, discard any friend data the
+game has stored. The module drops its in-memory friend objects automatically;
+the application remains responsible for its own persisted data.
 
 `ShowAccessPoint()` and `HideAccessPoint()` explicitly control Apple's floating
 Game Center widget. `IsAccessPointActive()` reports the requested state,

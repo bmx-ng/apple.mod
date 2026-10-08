@@ -30,9 +30,28 @@ extern void apple_gamekit_gamekit_apple_TGameCenter__OnLeaderboardSetLoadBegin(B
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnLeaderboardSetLoaded(BBObject *, int, BBString *, BBString *, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnLeaderboardSetLoadComplete(BBObject *, int, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnResourceImageLoaded(BBObject *, int, int, BBString *, BBArray *, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnFriendsAuthorizationLoaded(BBObject *, int, int, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnFriendsLoadBegin(BBObject *, int, int);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnFriendLoaded(BBObject *, int, BBString *, BBString *, BBString *, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnFriendsLoadComplete(BBObject *, int, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnPlayerPhotoLoaded(BBObject *, int, BBString *, int, BBArray *, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnViewDismissed(BBObject *, int);
 
 static BBObject *bmxGameKitService = NULL;
+static NSMutableDictionary<NSString *, GKPlayer *> *bmxGameKitPlayers = nil;
+
+static NSMutableDictionary<NSString *, GKPlayer *> *PlayerCache(void) {
+    if (!bmxGameKitPlayers) bmxGameKitPlayers = [[NSMutableDictionary alloc] init];
+    return bmxGameKitPlayers;
+}
+
+static void ResetPlayerCache(void) {
+    [bmxGameKitPlayers removeAllObjects];
+    GKLocalPlayer *player = GKLocalPlayer.localPlayer;
+    if (!player.isAuthenticated) return;
+    if (player.gamePlayerID.length) PlayerCache()[player.gamePlayerID] = player;
+    if (player.teamPlayerID.length) PlayerCache()[player.teamPlayerID] = player;
+}
 
 static NSString *NSStringFromBBString(BBString *value) {
     unsigned char *utf8 = bbStringToUTF8String(value);
@@ -101,6 +120,7 @@ static void NotifyAuthentication(NSError *error) {
     if (!bmxGameKitService) return;
     GKLocalPlayer *player = GKLocalPlayer.localPlayer;
     BOOL authenticated = player.isAuthenticated;
+    ResetPlayerCache();
     BBString *domain;
     BBString *message;
     int code;
@@ -164,6 +184,8 @@ static void CompleteSimple(void (^callback)(BBString *, int, BBString *), NSErro
 
 static void SendLeaderboardEntry(int requestId, GKLeaderboardEntry *entry, int localPlayer) API_AVAILABLE(ios(14.0), macos(11.0)) {
     GKPlayer *player = entry.player;
+    if (player.gamePlayerID.length) PlayerCache()[player.gamePlayerID] = player;
+    if (player.teamPlayerID.length) PlayerCache()[player.teamPlayerID] = player;
     apple_gamekit_gamekit_apple_TGameCenter__OnLeaderboardEntry(
         bmxGameKitService, requestId, localPlayer,
         BBStringFromNSString(player.gamePlayerID), BBStringFromNSString(player.teamPlayerID),
@@ -217,6 +239,7 @@ void bmx_gamekit_start(BBObject *service) {
 void bmx_gamekit_stop(void) {
     DispatchMain(^{
         GKLocalPlayer.localPlayer.authenticateHandler = nil;
+        [bmxGameKitPlayers removeAllObjects];
         if (@available(iOS 14.0, macOS 11.0, *)) {
             GKAccessPoint.shared.active = NO;
         }
@@ -224,6 +247,98 @@ void bmx_gamekit_stop(void) {
             BBRELEASE(bmxGameKitService);
             bmxGameKitService = NULL;
         }
+    });
+}
+
+static void CompletePlayerPhoto(int requestId, NSString *identifier, int size, BMXGameKitImage *image, NSError *error) {
+    if (!error && !image) error = ModuleError(-4, @"Game Center did not return a photo for this player.");
+    CompleteSimple(^(BBString *domain, int code, BBString *message) {
+        apple_gamekit_gamekit_apple_TGameCenter__OnPlayerPhotoLoaded(
+            bmxGameKitService, requestId, BBStringFromNSString(identifier), size,
+            BBByteArrayFromNSData(PNGDataFromImage(image)), domain, code, message);
+    }, error);
+}
+
+static void LoadPhotoForPlayer(int requestId, NSString *identifier, int size, GKPlayer *player) {
+    if (!player) {
+        CompletePlayerPhoto(requestId, identifier, size, nil, ModuleError(-3, @"The requested player is not available in this Game Center session."));
+        return;
+    }
+    [player loadPhotoForSize:(GKPhotoSize)size withCompletionHandler:^(BMXGameKitImage *photo, NSError *error) {
+        DispatchMain(^{ if (bmxGameKitService) CompletePlayerPhoto(requestId, identifier, size, photo, error); });
+    }];
+}
+
+void bmx_gamekit_load_friends_authorization(int requestId) {
+    DispatchMain(^{
+        if (@available(iOS 14.5, macOS 11.3, *)) {
+            [GKLocalPlayer.localPlayer loadFriendsAuthorizationStatus:^(GKFriendsAuthorizationStatus status, NSError *error) {
+                DispatchMain(^{
+                    if (!bmxGameKitService) return;
+                    if (status == GKFriendsAuthorizationStatusRestricted || status == GKFriendsAuthorizationStatusDenied) {
+                        ResetPlayerCache();
+                    }
+                    CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                        apple_gamekit_gamekit_apple_TGameCenter__OnFriendsAuthorizationLoaded(
+                            bmxGameKitService, requestId, (int)status, domain, code, message);
+                    }, error);
+                });
+            }];
+        } else {
+            NSError *error = ModuleError(-1, @"Friends access requires iOS 14.5 or macOS 11.3.");
+            CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                apple_gamekit_gamekit_apple_TGameCenter__OnFriendsAuthorizationLoaded(
+                    bmxGameKitService, requestId, 0, domain, code, message);
+            }, error);
+        }
+    });
+}
+
+void bmx_gamekit_load_friends(int requestId) {
+    DispatchMain(^{
+        if (@available(iOS 14.5, macOS 11.3, *)) {
+            [GKLocalPlayer.localPlayer loadFriends:^(NSArray<GKPlayer *> *friends, NSError *error) {
+                DispatchMain(^{
+                    if (!bmxGameKitService) return;
+                    NSArray<GKPlayer *> *values = friends ?: @[];
+                    apple_gamekit_gamekit_apple_TGameCenter__OnFriendsLoadBegin(bmxGameKitService, requestId, (int)values.count);
+                    for (GKPlayer *player in values) {
+                        if (player.gamePlayerID.length) PlayerCache()[player.gamePlayerID] = player;
+                        if (player.teamPlayerID.length) PlayerCache()[player.teamPlayerID] = player;
+                        apple_gamekit_gamekit_apple_TGameCenter__OnFriendLoaded(
+                            bmxGameKitService, requestId, BBStringFromNSString(player.gamePlayerID),
+                            BBStringFromNSString(player.teamPlayerID), BBStringFromNSString(player.alias),
+                            BBStringFromNSString(player.displayName));
+                    }
+                    CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                        apple_gamekit_gamekit_apple_TGameCenter__OnFriendsLoadComplete(bmxGameKitService, requestId, domain, code, message);
+                    }, error);
+                });
+            }];
+        } else {
+            apple_gamekit_gamekit_apple_TGameCenter__OnFriendsLoadBegin(bmxGameKitService, requestId, 0);
+            NSError *error = ModuleError(-1, @"Friends access requires iOS 14.5 or macOS 11.3.");
+            CompleteSimple(^(BBString *domain, int code, BBString *message) {
+                apple_gamekit_gamekit_apple_TGameCenter__OnFriendsLoadComplete(bmxGameKitService, requestId, domain, code, message);
+            }, error);
+        }
+    });
+}
+
+void bmx_gamekit_load_player_photo(int requestId, BBString *identifierValue, int size) {
+    NSString *identifier = NSStringFromBBString(identifierValue);
+    DispatchMain(^{
+        if (!identifier.length) {
+            CompletePlayerPhoto(requestId, identifier, size, nil, ModuleError(-2, @"A Game Center player is required."));
+            return;
+        }
+        GKPlayer *player = bmxGameKitPlayers[identifier];
+        if (player) {
+            LoadPhotoForPlayer(requestId, identifier, size, player);
+            return;
+        }
+        CompletePlayerPhoto(requestId, identifier, size, nil,
+            ModuleError(-3, @"The requested player is not available in this Game Center session."));
     });
 }
 

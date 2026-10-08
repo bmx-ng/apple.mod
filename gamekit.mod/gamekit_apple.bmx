@@ -80,6 +80,25 @@ Enum EGameCenterResourceKind
 End Enum
 
 Rem
+bbdoc: Whether the local player permits this game to access their Game Center friends.
+End Rem
+Enum EGameCenterFriendsAuthorization
+	NotDetermined
+	Restricted
+	Denied
+	Authorized
+End Enum
+
+Rem
+bbdoc: The size of Game Center player photo to request.
+about: Apple chooses the exact pixel dimensions for each device.
+End Rem
+Enum EGameCenterPhotoSize
+	Small
+	Normal
+End Enum
+
+Rem
 bbdoc: An error returned by GameKit.
 End Rem
 Type TGameCenterError
@@ -120,6 +139,13 @@ Type TGameCenterPlayer
 		player.personalizedCommunicationRestricted = personalizedCommunicationRestricted
 		Return player
 	End Function
+End Type
+
+Rem
+bbdoc: Players returned by a friends request.
+End Rem
+Type TGameCenterPlayerResult
+	Field players:TGameCenterPlayer[]
 End Type
 
 Rem
@@ -308,6 +334,16 @@ Interface IGameCenterMetadataListener
 	Method OnGameCenterResourceImageLoaded(requestId:Int, kind:EGameCenterResourceKind, identifier:String, pngData:Byte[], error:TGameCenterError)
 End Interface
 
+Rem
+bbdoc: Optional listener for Game Center friends and player photos.
+about: Friend access requires an NSGKFriendListUsageDescription entry in the application's Info.plist. Calling #TGameCenter.LoadFriends can display Apple's permission prompt.
+End Rem
+Interface IGameCenterPlayerListener
+	Method OnGameCenterFriendsAuthorizationLoaded(requestId:Int, status:EGameCenterFriendsAuthorization, error:TGameCenterError)
+	Method OnGameCenterFriendsLoaded(requestId:Int, result:TGameCenterPlayerResult, error:TGameCenterError)
+	Method OnGameCenterPlayerPhotoLoaded(requestId:Int, gamePlayerId:String, size:EGameCenterPhotoSize, pngData:Byte[], error:TGameCenterError)
+End Interface
+
 Private
 
 Type TAchievementLoad
@@ -337,6 +373,11 @@ Type TLeaderboardLoad
 	Field index:Int
 End Type
 
+Type TPlayerLoad
+	Field values:TGameCenterPlayer[]
+	Field index:Int
+End Type
+
 Public
 
 Rem
@@ -353,6 +394,7 @@ Type TGameCenter
 	Field achievementDescriptionLoads:TMap = New TMap
 	Field leaderboardInfoLoads:TMap = New TMap
 	Field leaderboardSetLoads:TMap = New TMap
+	Field playerLoads:TMap = New TMap
 
 	Rem
 	bbdoc: Returns the process-wide Game Center service.
@@ -388,6 +430,7 @@ Type TGameCenter
 		achievementDescriptionLoads.Clear()
 		leaderboardInfoLoads.Clear()
 		leaderboardSetLoads.Clear()
+		playerLoads.Clear()
 	End Method
 
 	Rem
@@ -533,6 +576,41 @@ Type TGameCenter
 	Method LoadResourceImage:Int(kind:EGameCenterResourceKind, identifier:String)
 		Local requestId:Int = NextRequest()
 		bmx_gamekit_load_resource_image(requestId, kind, identifier)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Loads the current Game Center friends authorization state without displaying a permission prompt.
+	about: Requires NSGKFriendListUsageDescription in the application Info.plist and iOS 14.5 or macOS 11.3.
+	returns: A request identifier supplied to #IGameCenterPlayerListener.
+	End Rem
+	Method LoadFriendsAuthorizationStatus:Int()
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_load_friends_authorization(requestId)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Loads friends who have also allowed this game to access their friends list.
+	about: If authorization is not determined, this call displays Apple's permission prompt. Call it from a deliberate user action rather than during gameplay. Requires NSGKFriendListUsageDescription in the application Info.plist and iOS 14.5 or macOS 11.3.
+	returns: A request identifier supplied to #IGameCenterPlayerListener.
+	End Rem
+	Method LoadFriends:Int()
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_load_friends(requestId)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Loads a Game Center player photo as PNG bytes.
+	about: The player must have been supplied by Game Center during this session. The local player's photo is always available for lookup; a friend may also be resolved after friend-list authorization.
+	returns: A request identifier supplied to #IGameCenterPlayerListener.
+	End Rem
+	Method LoadPlayerPhoto:Int(player:TGameCenterPlayer, size:EGameCenterPhotoSize = EGameCenterPhotoSize.Normal)
+		Local requestId:Int = NextRequest()
+		Local identifier:String
+		If player Then identifier = player.gamePlayerId
+		bmx_gamekit_load_player_photo(requestId, identifier, size)
 		Return requestId
 	End Method
 
@@ -726,6 +804,43 @@ Type TGameCenter
 		If metadataListener Then metadataListener.OnGameCenterResourceImageLoaded(requestId, kind, identifier, pngData, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
 	End Function
 
+	Function _OnFriendsAuthorizationLoaded(service:TGameCenter, requestId:Int, status:EGameCenterFriendsAuthorization, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local playerListener:IGameCenterPlayerListener = IGameCenterPlayerListener(service.listener)
+		If playerListener Then playerListener.OnGameCenterFriendsAuthorizationLoaded(requestId, status, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnFriendsLoadBegin(service:TGameCenter, requestId:Int, count:Int) { nomangle }
+		Local load:TPlayerLoad = New TPlayerLoad
+		load.values = New TGameCenterPlayer[count]
+		service.playerLoads.Insert(String.FromInt(requestId), load)
+	End Function
+
+	Function _OnFriendLoaded(service:TGameCenter, requestId:Int, gamePlayerId:String, teamPlayerId:String, alias:String, displayName:String) { nomangle }
+		Local load:TPlayerLoad = TPlayerLoad(service.playerLoads.ValueForKey(String.FromInt(requestId)))
+		If load And load.index < load.values.length Then
+			load.values[load.index] = TGameCenterPlayer._Create(gamePlayerId, teamPlayerId, alias, displayName)
+			load.index :+ 1
+		End If
+	End Function
+
+	Function _OnFriendsLoadComplete(service:TGameCenter, requestId:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local key:String = String.FromInt(requestId)
+		Local load:TPlayerLoad = TPlayerLoad(service.playerLoads.ValueForKey(key))
+		service.playerLoads.Remove(key)
+		Local result:TGameCenterPlayerResult
+		If load Then
+			result = New TGameCenterPlayerResult
+			result.players = load.values
+		End If
+		Local playerListener:IGameCenterPlayerListener = IGameCenterPlayerListener(service.listener)
+		If playerListener Then playerListener.OnGameCenterFriendsLoaded(requestId, result, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
+	Function _OnPlayerPhotoLoaded(service:TGameCenter, requestId:Int, gamePlayerId:String, size:EGameCenterPhotoSize, pngData:Byte[], errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local playerListener:IGameCenterPlayerListener = IGameCenterPlayerListener(service.listener)
+		If playerListener Then playerListener.OnGameCenterPlayerPhotoLoaded(requestId, gamePlayerId, size, pngData, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+	End Function
+
 	Function _OnViewDismissed(service:TGameCenter, view:EGameCenterView) { nomangle }
 		If service.listener Then service.listener.OnGameCenterViewDismissed(view)
 	End Function
@@ -754,4 +869,7 @@ Extern
 	Function bmx_gamekit_load_leaderboards(requestId:Int, setIdentifier:String)
 	Function bmx_gamekit_load_leaderboard_sets(requestId:Int)
 	Function bmx_gamekit_load_resource_image(requestId:Int, kind:EGameCenterResourceKind, identifier:String)
+	Function bmx_gamekit_load_friends_authorization(requestId:Int)
+	Function bmx_gamekit_load_friends(requestId:Int)
+	Function bmx_gamekit_load_player_photo(requestId:Int, gamePlayerId:String, size:EGameCenterPhotoSize)
 End Extern
