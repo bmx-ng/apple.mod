@@ -12,6 +12,7 @@
 #endif
 
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnAuthenticationChanged(BBObject *, int, BBString *, BBString *, BBString *, BBString *, int, int, int, BBString *, int, BBString *);
+extern void apple_gamekit_gamekit_apple_TGameCenter__OnMatchFound(BBObject *, int, int, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnIdentityVerificationFetched(BBObject *, int, BBString *, BBString *, BBString *, BBString *, BBArray *, BBArray *, BBULONG, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnAchievementReported(BBObject *, int, BBString *, BBString *, int, BBString *);
 extern void apple_gamekit_gamekit_apple_TGameCenter__OnAchievementLoadBegin(BBObject *, int, int);
@@ -69,10 +70,14 @@ static NSMutableDictionary<NSString *, GKPlayer *> *bmxGameKitPlayers = nil;
 static NSMutableDictionary<NSNumber *, GKSavedGame *> *bmxGameKitSavedGames = nil;
 static NSMutableDictionary<NSNumber *, NSArray<GKSavedGame *> *> *bmxGameKitSavedGameConflicts = nil;
 static NSMutableDictionary *bmxGameKitActivities = nil;
+static NSMutableDictionary *bmxGameKitMatches = nil;
 static NSString *bmxGameKitAuthenticatedPlayerID = nil;
 static int bmxGameKitNextSavedGameHandle = 1;
 static int bmxGameKitNextConflictHandle = 1;
 static int bmxGameKitNextActivityHandle = 1;
+static int bmxGameKitNextMatchHandle = 1;
+
+static void ResetMatches(void);
 
 static NSMutableDictionary<NSString *, GKPlayer *> *PlayerCache(void) {
     if (!bmxGameKitPlayers) bmxGameKitPlayers = [[NSMutableDictionary alloc] init];
@@ -214,6 +219,7 @@ static void NotifyAuthentication(NSError *error) {
     if (accountChanged) {
         ResetSavedGameCaches();
         ResetActivityCache();
+        ResetMatches();
     }
     BBString *domain;
     BBString *message;
@@ -521,6 +527,162 @@ static void SendSavedGameList(int operation, int identifier, int conflictId, NSA
     });
 }
 
+static const NSUInteger BMXGameKitMatchEventCapacity = 512;
+
+@interface BMXGameKitMatchEvent : NSObject
+@property(nonatomic) int kind;
+@property(nonatomic) int playerIndex;
+@property(nonatomic, strong) NSData *data;
+@property(nonatomic, strong) NSError *error;
+@end
+
+@implementation BMXGameKitMatchEvent
+
+#if !__has_feature(objc_arc)
+- (void)dealloc {
+    [_data release];
+    [_error release];
+    [super dealloc];
+}
+#endif
+
+@end
+
+@interface BMXGameKitMatch : NSObject <GKMatchDelegate>
+@property(nonatomic, strong) GKMatch *match;
+@property(nonatomic, strong) NSMutableArray<GKPlayer *> *players;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *playerIndices;
+@property(nonatomic, strong) NSMutableSet<NSNumber *> *connectedPlayers;
+@property(nonatomic, strong) NSMutableArray<BMXGameKitMatchEvent *> *events;
+@property(nonatomic) BOOL open;
+@property(nonatomic) BOOL overflowed;
+- (instancetype)initWithMatch:(GKMatch *)match;
+- (int)playerIndex:(GKPlayer *)player;
+- (void)queueKind:(int)kind player:(GKPlayer *)player data:(NSData *)data error:(NSError *)error;
+@end
+
+@implementation BMXGameKitMatch
+
+- (instancetype)initWithMatch:(GKMatch *)match {
+    self = [super init];
+    if (!self) return nil;
+    self.match = match;
+    self.players = [NSMutableArray array];
+    self.playerIndices = [NSMutableDictionary dictionary];
+    self.connectedPlayers = [NSMutableSet set];
+    self.events = [NSMutableArray arrayWithCapacity:MIN(BMXGameKitMatchEventCapacity, 32)];
+    _open = YES;
+    match.delegate = self;
+    for (GKPlayer *player in match.players) {
+        int playerIndex = [self playerIndex:player];
+        [_connectedPlayers addObject:@(playerIndex)];
+        [self queueKind:1 player:player data:nil error:nil];
+    }
+    return self;
+}
+
+#if !__has_feature(objc_arc)
+- (void)dealloc {
+    [_match release];
+    [_players release];
+    [_playerIndices release];
+    [_connectedPlayers release];
+    [_events release];
+    [super dealloc];
+}
+#endif
+
+- (int)playerIndex:(GKPlayer *)player {
+    if (!player) return 0;
+    NSString *identifier = player.gamePlayerID ?: @"";
+    NSNumber *existing = self.playerIndices[identifier];
+    if (existing) return existing.intValue;
+    [self.players addObject:player];
+    int playerIndex = (int)self.players.count;
+    self.playerIndices[identifier] = @(playerIndex);
+    if (player.gamePlayerID.length) PlayerCache()[player.gamePlayerID] = player;
+    if (player.teamPlayerID.length) PlayerCache()[player.teamPlayerID] = player;
+    return playerIndex;
+}
+
+- (void)queueKind:(int)kind player:(GKPlayer *)player data:(NSData *)data error:(NSError *)error {
+    @synchronized (self) {
+        if (self.events.count >= BMXGameKitMatchEventCapacity) {
+            self.overflowed = YES;
+            return;
+        }
+        BMXGameKitMatchEvent *event = [[BMXGameKitMatchEvent alloc] init];
+        event.kind = kind;
+        event.playerIndex = [self playerIndex:player];
+        event.data = data;
+        event.error = error;
+        [self.events addObject:event];
+#if !__has_feature(objc_arc)
+        [event release];
+#endif
+    }
+}
+
+- (void)match:(GKMatch *)match didReceiveData:(NSData *)data fromRemotePlayer:(GKPlayer *)player {
+    DispatchMain(^{ [self queueKind:3 player:player data:data error:nil]; });
+}
+
+- (void)match:(GKMatch *)match didReceiveData:(NSData *)data forRecipient:(GKPlayer *)recipient fromRemotePlayer:(GKPlayer *)player {
+    DispatchMain(^{ [self queueKind:3 player:player data:data error:nil]; });
+}
+
+- (void)match:(GKMatch *)match player:(GKPlayer *)player didChangeConnectionState:(GKPlayerConnectionState)state {
+    DispatchMain(^{
+        int playerIndex = [self playerIndex:player];
+        NSNumber *key = @(playerIndex);
+        if (state == GKPlayerStateConnected) {
+            if (![self.connectedPlayers containsObject:key]) {
+                [self.connectedPlayers addObject:key];
+                [self queueKind:1 player:player data:nil error:nil];
+            }
+        } else if (state == GKPlayerStateDisconnected) {
+            if ([self.connectedPlayers containsObject:key]) {
+                [self.connectedPlayers removeObject:key];
+                [self queueKind:2 player:player data:nil error:nil];
+            }
+        }
+    });
+}
+
+- (void)match:(GKMatch *)match didFailWithError:(NSError *)error {
+    DispatchMain(^{
+        self.open = NO;
+        [self queueKind:4 player:nil data:nil error:error ?: ModuleError(-12, @"The Game Center match failed.")];
+    });
+}
+
+@end
+
+static NSMutableDictionary<NSNumber *, BMXGameKitMatch *> *MatchCache(void) {
+    if (!bmxGameKitMatches) bmxGameKitMatches = [[NSMutableDictionary alloc] init];
+    return bmxGameKitMatches;
+}
+
+static int StoreMatch(GKMatch *match) {
+    if (!match) return 0;
+    int handle = NextPositiveHandle(&bmxGameKitNextMatchHandle);
+    BMXGameKitMatch *wrapper = [[BMXGameKitMatch alloc] initWithMatch:match];
+    MatchCache()[@(handle)] = wrapper;
+#if !__has_feature(objc_arc)
+    [wrapper release];
+#endif
+    return handle;
+}
+
+static void ResetMatches(void) {
+    for (BMXGameKitMatch *wrapper in MatchCache().allValues) {
+        wrapper.open = NO;
+        wrapper.match.delegate = nil;
+        [wrapper.match disconnect];
+    }
+    [bmxGameKitMatches removeAllObjects];
+}
+
 @interface BMXGameKitLocalPlayerListener : NSObject <GKLocalPlayerListener>
 @end
 
@@ -601,6 +763,7 @@ void bmx_gamekit_stop(void) {
         [bmxGameKitPlayers removeAllObjects];
         ResetSavedGameCaches();
         ResetActivityCache();
+        ResetMatches();
         bmxGameKitAuthenticatedPlayerID = nil;
         if (@available(iOS 14.0, macOS 11.0, *)) {
             GKAccessPoint.shared.active = NO;
@@ -610,6 +773,166 @@ void bmx_gamekit_stop(void) {
             bmxGameKitService = NULL;
         }
     });
+}
+
+static void CompleteMatchmaking(int requestId, GKMatch *match, NSError *error) {
+    DispatchMain(^{
+        if (!bmxGameKitService) {
+            match.delegate = nil;
+            [match disconnect];
+            return;
+        }
+        NSError *completionError = error;
+        int handle = completionError ? 0 : StoreMatch(match);
+        if (!completionError && !handle) completionError = ModuleError(-10, @"Game Center did not return a match.");
+        if (completionError && match) {
+            match.delegate = nil;
+            [match disconnect];
+        }
+        CompleteSimple(^(BBString *domain, int code, BBString *message) {
+            apple_gamekit_gamekit_apple_TGameCenter__OnMatchFound(
+                bmxGameKitService, requestId, handle, domain, code, message);
+        }, completionError);
+    });
+}
+
+void bmx_gamekit_find_match(int requestId, int minPlayers, int maxPlayers, unsigned int playerGroup, unsigned int playerAttributes) {
+    DispatchMain(^{
+        GKLocalPlayer *localPlayer = GKLocalPlayer.localPlayer;
+        if (!localPlayer.isAuthenticated) {
+            CompleteMatchmaking(requestId, nil, ModuleError(-2, @"The local Game Center player is not authenticated."));
+            return;
+        }
+        if (localPlayer.isMultiplayerGamingRestricted) {
+            CompleteMatchmaking(requestId, nil, ModuleError(-3, @"Multiplayer gaming is restricted for the local player."));
+            return;
+        }
+        NSUInteger maximum = [GKMatchRequest maxPlayersAllowedForMatchOfType:GKMatchTypePeerToPeer];
+        if (minPlayers < 2 || maxPlayers < minPlayers || (NSUInteger)maxPlayers > maximum) {
+            CompleteMatchmaking(requestId, nil, ModuleError(-4, @"The requested Game Center player range is invalid."));
+            return;
+        }
+        GKMatchRequest *request = [[GKMatchRequest alloc] init];
+        request.minPlayers = (NSUInteger)minPlayers;
+        request.maxPlayers = (NSUInteger)maxPlayers;
+        request.playerGroup = (NSUInteger)playerGroup;
+        request.playerAttributes = (uint32_t)playerAttributes;
+        [GKMatchmaker.sharedMatchmaker findMatchForRequest:request withCompletionHandler:^(GKMatch *match, NSError *error) {
+            CompleteMatchmaking(requestId, match, error);
+        }];
+    });
+}
+
+void bmx_gamekit_cancel_matchmaking(void) {
+    DispatchMain(^{ [GKMatchmaker.sharedMatchmaker cancel]; });
+}
+
+int bmx_gamekit_match_expected_player_count(int handle) {
+    BMXGameKitMatch *wrapper = MatchCache()[@(handle)];
+    return wrapper ? (int)wrapper.match.expectedPlayerCount : 0;
+}
+
+int bmx_gamekit_match_player_count(int handle) {
+    BMXGameKitMatch *wrapper = MatchCache()[@(handle)];
+    return wrapper ? (int)wrapper.players.count : 0;
+}
+
+int bmx_gamekit_match_player(int handle, int playerIndex,
+                             BBString **gamePlayerID, BBString **teamPlayerID,
+                             BBString **alias, BBString **displayName,
+                             int *underage, int *multiplayerRestricted,
+                             int *personalizedCommunicationRestricted) {
+    BMXGameKitMatch *wrapper = MatchCache()[@(handle)];
+    GKPlayer *player = nil;
+    if (wrapper && playerIndex > 0 && (NSUInteger)playerIndex <= wrapper.players.count) {
+        player = wrapper.players[(NSUInteger)playerIndex - 1];
+    }
+    *gamePlayerID = player ? BBStringFromNSString(player.gamePlayerID) : &bbEmptyString;
+    *teamPlayerID = player ? BBStringFromNSString(player.teamPlayerID) : &bbEmptyString;
+    *alias = player ? BBStringFromNSString(player.alias) : &bbEmptyString;
+    *displayName = player ? BBStringFromNSString(player.displayName) : &bbEmptyString;
+	*underage = 0;
+	*multiplayerRestricted = 0;
+    *personalizedCommunicationRestricted = 0;
+    return player != nil;
+}
+
+int bmx_gamekit_match_poll(int handle, void *data, size_t dataCapacity,
+                           int *kind, int *playerIndex, size_t *dataLength,
+                           BBString **errorDomain, int *errorCode, BBString **errorMessage) {
+    BMXGameKitMatch *wrapper = MatchCache()[@(handle)];
+    *kind = 0;
+    *playerIndex = 0;
+    *dataLength = 0;
+    *errorDomain = &bbEmptyString;
+    *errorCode = 0;
+    *errorMessage = &bbEmptyString;
+    if (!wrapper) return 0;
+
+    BMXGameKitMatchEvent *event = nil;
+    @synchronized (wrapper) {
+        if (wrapper.overflowed) {
+            wrapper.overflowed = NO;
+            *kind = 4;
+            NSError *error = ModuleError(-11, @"The Game Center match event queue overflowed.");
+            ErrorValues(error, errorDomain, errorCode, errorMessage);
+            return 1;
+        }
+        if (!wrapper.events.count) return 0;
+        event = wrapper.events.firstObject;
+#if !__has_feature(objc_arc)
+        [event retain];
+#endif
+        [wrapper.events removeObjectAtIndex:0];
+    }
+
+    *kind = event.kind;
+    *playerIndex = event.playerIndex;
+    *dataLength = event.data.length;
+    if (event.data.length && data && event.data.length <= dataCapacity) {
+        memcpy(data, event.data.bytes, event.data.length);
+    }
+    ErrorValues(event.error, errorDomain, errorCode, errorMessage);
+#if !__has_feature(objc_arc)
+    [event release];
+#endif
+    return 1;
+}
+
+int bmx_gamekit_match_send(int handle, int playerIndex, int mode, const void *data, size_t length,
+                           BBString **errorDomain, int *errorCode, BBString **errorMessage) {
+    BMXGameKitMatch *wrapper = MatchCache()[@(handle)];
+    NSError *error = nil;
+    BOOL sent = NO;
+    if (!wrapper || !wrapper.open) {
+        error = ModuleError(-5, @"The Game Center match is closed.");
+    } else if (playerIndex <= 0 || (NSUInteger)playerIndex > wrapper.players.count) {
+        error = ModuleError(-6, @"The Game Center match player is invalid.");
+    } else if (length && !data) {
+        error = ModuleError(-7, @"Packet data is missing.");
+    } else if (mode < GKMatchSendDataReliable || mode > GKMatchSendDataUnreliable) {
+        error = ModuleError(-8, @"The Game Center match send mode is invalid.");
+    } else {
+        NSData *packet = [NSData dataWithBytes:data length:length];
+        GKPlayer *player = wrapper.players[(NSUInteger)playerIndex - 1];
+        sent = [wrapper.match sendData:packet toPlayers:@[player] dataMode:(GKMatchSendDataMode)mode error:&error];
+    }
+    ErrorValues(error, errorDomain, errorCode, errorMessage);
+    return sent;
+}
+
+int bmx_gamekit_match_is_open(int handle) {
+    BMXGameKitMatch *wrapper = MatchCache()[@(handle)];
+    return wrapper && wrapper.open;
+}
+
+void bmx_gamekit_match_disconnect(int handle) {
+    BMXGameKitMatch *wrapper = MatchCache()[@(handle)];
+    if (!wrapper) return;
+    [MatchCache() removeObjectForKey:@(handle)];
+    wrapper.open = NO;
+    wrapper.match.delegate = nil;
+    [wrapper.match disconnect];
 }
 
 static void CompletePlayerPhoto(int requestId, NSString *identifier, int size, BMXGameKitImage *image, NSError *error) {

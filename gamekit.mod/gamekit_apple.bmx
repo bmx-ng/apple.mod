@@ -133,6 +133,25 @@ Enum EGameCenterActivityOperation
 End Enum
 
 Rem
+bbdoc: Delivery guarantee used by a real-time Game Center match.
+End Rem
+Enum EGameCenterMatchSendMode
+	Reliable
+	Unreliable
+End Enum
+
+Rem
+bbdoc: An event returned by #TGameCenterMatch.Poll.
+End Rem
+Enum EGameCenterMatchEventKind
+	None
+	PlayerConnected
+	PlayerDisconnected
+	Data
+	Failed
+End Enum
+
+Rem
 bbdoc: An error returned by GameKit.
 End Rem
 Type TGameCenterError
@@ -199,6 +218,158 @@ Type TGameCenterPlayer
 		player.personalizedCommunicationRestricted = personalizedCommunicationRestricted
 		Return player
 	End Function
+End Type
+
+Rem
+bbdoc: One connection, disconnection, packet, or failure from a real-time Game Center match.
+about: PlayerIndex is a stable, one-based identifier within this match. Data is
+copied into the buffer supplied to #TGameCenterMatch.Poll. If DataLength is
+larger than that buffer, the packet was discarded and the caller should treat
+the event as an oversized packet.
+End Rem
+Struct SGameCenterMatchEvent
+	Private
+	Field _kind:EGameCenterMatchEventKind
+	Field _playerIndex:Int
+	Field _dataLength:Size_T
+	Field _error:TGameCenterError
+
+	Public
+	Method New(kind:EGameCenterMatchEventKind, playerIndex:Int, dataLength:Size_T, error:TGameCenterError)
+		_kind = kind
+		_playerIndex = playerIndex
+		_dataLength = dataLength
+		_error = error
+	End Method
+
+	Method New()
+	End Method
+
+	Method Kind:EGameCenterMatchEventKind()
+		Return _kind
+	End Method
+
+	Method PlayerIndex:Int()
+		Return _playerIndex
+	End Method
+
+	Method DataLength:Size_T()
+		Return _dataLength
+	End Method
+
+	Method Error:TGameCenterError()
+		Return _error
+	End Method
+End Struct
+
+Rem
+bbdoc: A pollable real-time match created by Game Center matchmaking.
+about: Match player indices are stable only within this object. Call
+#Disconnect before discarding a live match. Packet polling copies directly
+into caller-owned storage and does not create a managed byte array.
+End Rem
+Type TGameCenterMatch
+	Private
+	Field _handle:Int
+
+	Public
+	Function _Create:TGameCenterMatch(handle:Int)
+		If handle <= 0 Then Return Null
+		Local match:TGameCenterMatch = New TGameCenterMatch
+		match._handle = handle
+		Return match
+	End Function
+
+	Method Delete()
+		Disconnect()
+	End Method
+
+	Rem
+	bbdoc: Returns the number of invited player slots which have not connected yet.
+	End Rem
+	Method ExpectedPlayerCount:Int()
+		If _handle <= 0 Then Return 0
+		Return bmx_gamekit_match_expected_player_count(_handle)
+	End Method
+
+	Rem
+	bbdoc: Returns the number of remote players known to this match.
+	End Rem
+	Method PlayerCount:Int()
+		If _handle <= 0 Then Return 0
+		Return bmx_gamekit_match_player_count(_handle)
+	End Method
+
+	Rem
+	bbdoc: Returns public information for a stable one-based match player index.
+	End Rem
+	Method Player:TGameCenterPlayer(playerIndex:Int)
+		If _handle <= 0 Or playerIndex <= 0 Then Return Null
+		Local gamePlayerId:String
+		Local teamPlayerId:String
+		Local alias:String
+		Local displayName:String
+		Local underage:Int
+		Local multiplayerRestricted:Int
+		Local personalizedCommunicationRestricted:Int
+		If Not bmx_gamekit_match_player(_handle, playerIndex, gamePlayerId, teamPlayerId, alias, displayName, underage, multiplayerRestricted, personalizedCommunicationRestricted) Then Return Null
+		Return TGameCenterPlayer._Create(gamePlayerId, teamPlayerId, alias, displayName, underage, multiplayerRestricted, personalizedCommunicationRestricted)
+	End Method
+
+	Rem
+	bbdoc: Copies and removes the next queued match event.
+	returns: True when an event was returned, or False when the queue is empty.
+	about: @dataCapacity may be zero with a Null @data pointer. For a data event,
+	compare #SGameCenterMatchEvent.DataLength with @dataCapacity before reading.
+	End Rem
+	Method Poll:Int(event:SGameCenterMatchEvent Var, data:Byte Ptr, dataCapacity:Size_T)
+		If _handle <= 0 Then
+			event = New SGameCenterMatchEvent
+			Return False
+		End If
+		Local kind:EGameCenterMatchEventKind
+		Local playerIndex:Int
+		Local dataLength:Size_T
+		Local errorDomain:String
+		Local errorCode:Int
+		Local errorMessage:String
+		If Not bmx_gamekit_match_poll(_handle, data, dataCapacity, kind, playerIndex, dataLength, errorDomain, errorCode, errorMessage) Then
+			event = New SGameCenterMatchEvent
+			Return False
+		End If
+		event = New SGameCenterMatchEvent(kind, playerIndex, dataLength, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+		Return True
+	End Method
+
+	Rem
+	bbdoc: Sends one packet to a connected match player.
+	End Rem
+	Method Send:Int(playerIndex:Int, mode:EGameCenterMatchSendMode, data:Byte Ptr, length:Size_T, error:TGameCenterError Var)
+		If _handle <= 0 Then Return False
+		Local errorDomain:String
+		Local errorCode:Int
+		Local errorMessage:String
+		Local result:Int = bmx_gamekit_match_send(_handle, playerIndex, mode, data, length, errorDomain, errorCode, errorMessage)
+		error = TGameCenterError._Create(errorDomain, errorCode, errorMessage)
+		Return result
+	End Method
+
+	Rem
+	bbdoc: Returns True while the native match remains available.
+	End Rem
+	Method IsOpen:Int()
+		Return _handle > 0 And bmx_gamekit_match_is_open(_handle)
+	End Method
+
+	Rem
+	bbdoc: Disconnects from every player and releases the native match.
+	End Rem
+	Method Disconnect()
+		If _handle > 0 Then
+			bmx_gamekit_match_disconnect(_handle)
+			_handle = 0
+		End If
+	End Method
 End Type
 
 Rem
@@ -600,6 +771,16 @@ Interface IGameCenterActivityManagementListener
 End Interface
 
 Rem
+bbdoc: Optional listener for real-time Game Center matchmaking.
+about: A listener object can implement this interface alongside
+#IGameCenterListener. A successful request transfers ownership of the returned
+match to the application; call #TGameCenterMatch.Disconnect when finished.
+End Rem
+Interface IGameCenterMultiplayerListener
+	Method OnGameCenterMatchFound(requestId:Int, match:TGameCenterMatch, error:TGameCenterError)
+End Interface
+
+Rem
 bbdoc: Optional listener for Game Center friends and player photos.
 about: Friend access requires an NSGKFriendListUsageDescription entry in the application's Info.plist. Calling #TGameCenter.LoadFriends can display Apple's permission prompt.
 End Rem
@@ -767,6 +948,27 @@ Type TGameCenter
 	End Rem
 	Method AreActivitiesAvailable:Int()
 		Return bmx_gamekit_are_activities_available()
+	End Method
+
+	Rem
+	bbdoc: Begins programmatic real-time automatching.
+	returns: A request identifier supplied to #IGameCenterMultiplayerListener.
+	about: The local player must be authenticated and permitted to use
+	multiplayer. Game Center may return a match before all requested players have
+	connected; use #TGameCenterMatch.ExpectedPlayerCount and match events to
+	observe completion.
+	End Rem
+	Method FindMatch:Int(minPlayers:Int = 2, maxPlayers:Int = 2, playerGroup:UInt = 0, playerAttributes:UInt = 0)
+		Local requestId:Int = NextRequest()
+		bmx_gamekit_find_match(requestId, minPlayers, maxPlayers, playerGroup, playerAttributes)
+		Return requestId
+	End Method
+
+	Rem
+	bbdoc: Cancels the current programmatic matchmaking request and pending invitations.
+	End Rem
+	Method CancelMatchmaking()
+		bmx_gamekit_cancel_matchmaking()
 	End Method
 
 	Rem
@@ -1198,6 +1400,15 @@ Type TGameCenter
 		If service.listener Then service.listener.OnGameCenterAuthenticationChanged(authenticated, player, TGameCenterError._Create(errorDomain, errorCode, errorMessage))
 	End Function
 
+	Function _OnMatchFound(service:TGameCenter, requestId:Int, matchHandle:Int, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
+		Local multiplayerListener:IGameCenterMultiplayerListener = IGameCenterMultiplayerListener(service.listener)
+		If multiplayerListener Then
+			multiplayerListener.OnGameCenterMatchFound(requestId, TGameCenterMatch._Create(matchHandle), TGameCenterError._Create(errorDomain, errorCode, errorMessage))
+		Else If matchHandle > 0 Then
+			bmx_gamekit_match_disconnect(matchHandle)
+		End If
+	End Function
+
 	Function _OnIdentityVerificationFetched(service:TGameCenter, requestId:Int, gamePlayerId:String, teamPlayerId:String, bundleIdentifier:String, publicKeyUrl:String, signature:Byte[], salt:Byte[], timestamp:ULong, errorDomain:String, errorCode:Int, errorMessage:String) { nomangle }
 		Local verification:TGameCenterIdentityVerification
 		If Not errorDomain Then
@@ -1623,6 +1834,15 @@ Extern
 	Function bmx_gamekit_is_authenticated:Int()
 	Function bmx_gamekit_are_challenges_available:Int()
 	Function bmx_gamekit_are_activities_available:Int()
+	Function bmx_gamekit_find_match(requestId:Int, minPlayers:Int, maxPlayers:Int, playerGroup:UInt, playerAttributes:UInt)
+	Function bmx_gamekit_cancel_matchmaking()
+	Function bmx_gamekit_match_expected_player_count:Int(handle:Int)
+	Function bmx_gamekit_match_player_count:Int(handle:Int)
+	Function bmx_gamekit_match_player:Int(handle:Int, playerIndex:Int, gamePlayerId:String Var, teamPlayerId:String Var, alias:String Var, displayName:String Var, underage:Int Var, multiplayerRestricted:Int Var, personalizedCommunicationRestricted:Int Var)
+	Function bmx_gamekit_match_poll:Int(handle:Int, data:Byte Ptr, dataCapacity:Size_T, kind:EGameCenterMatchEventKind Var, playerIndex:Int Var, dataLength:Size_T Var, errorDomain:String Var, errorCode:Int Var, errorMessage:String Var)
+	Function bmx_gamekit_match_send:Int(handle:Int, playerIndex:Int, mode:EGameCenterMatchSendMode, data:Byte Ptr, length:Size_T, errorDomain:String Var, errorCode:Int Var, errorMessage:String Var)
+	Function bmx_gamekit_match_is_open:Int(handle:Int)
+	Function bmx_gamekit_match_disconnect(handle:Int)
 	Function bmx_gamekit_fetch_identity_verification(requestId:Int)
 	Function bmx_gamekit_set_access_point_active(active:Int, location:EGameCenterAccessPointLocation)
 	Function bmx_gamekit_is_access_point_active:Int()
