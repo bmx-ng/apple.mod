@@ -929,10 +929,10 @@ int bmx_gamekit_match_is_open(int handle) {
 void bmx_gamekit_match_disconnect(int handle) {
     BMXGameKitMatch *wrapper = MatchCache()[@(handle)];
     if (!wrapper) return;
-    [MatchCache() removeObjectForKey:@(handle)];
     wrapper.open = NO;
     wrapper.match.delegate = nil;
     [wrapper.match disconnect];
+    [MatchCache() removeObjectForKey:@(handle)];
 }
 
 static void CompletePlayerPhoto(int requestId, NSString *identifier, int size, BMXGameKitImage *image, NSError *error) {
