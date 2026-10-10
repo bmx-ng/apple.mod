@@ -11,3 +11,4 @@
 *.module-config
 *.app/
 *.exe
+/gamekit.mod/examples/gamecenter

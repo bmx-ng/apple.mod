@@ -4,7 +4,8 @@
 and macOS. The API covers local-player authentication, server identity
 verification, players and friends, achievements, leaderboards, iCloud saved
 games, developer-defined challenges, game activities, resource artwork and the
-Game Center access point.
+Game Center access point. It also exposes programmatic real-time matchmaking
+and pollable `GKMatch` data exchange.
 
 The module contains no public API on non-Apple targets. This allows shared
 projects to import it conditionally without compiling Apple-specific types or
@@ -60,6 +61,29 @@ prepare the application before Game Center delivers the activity event.
 Game Center sends and displays the challenge notification. No custom push
 server or additional push-notification entitlement is needed for this flow.
 
+## Real-time multiplayer
+
+Implement `IGameCenterMultiplayerListener` and call `FindMatch()` to begin
+programmatic peer-to-peer automatching. The player range must begin at two and
+must not exceed Game Center's current peer-to-peer limit. `CancelMatchmaking()`
+cancels the outstanding search and invitations.
+
+A successful callback supplies a `TGameCenterMatch`. Its one-based player
+indices remain stable for the life of that object. `Poll()` returns player
+connections, disconnections, received data and native failures; packet bytes
+are copied directly into caller-owned storage. `Send()` targets one connected
+player using GameKit's reliable or unreliable mode. Call `Disconnect()` before
+discarding a live match.
+
+The native event queue is bounded. If an application fails to poll and fills
+it, the next event reports an `Apple.GameKit` queue-overflow error rather than
+allowing memory use to grow without limit.
+
+`Apple.GameKit` deliberately exposes Game Center concepts without imposing a
+game protocol. The separate `GameNet.GameKit` module adapts a match to
+`INetTransport`, adding logical channels and unreliable sequencing for use
+with `GameNet.Session`, snapshots and rollback.
+
 ## Game activities
 
 Game activities are developer-defined destinations in a game, introduced in
@@ -80,8 +104,8 @@ focused on pending and incoming deep-link events.
 `StartActivity(identifier)` creates an active instance. A definition that
 supports parties may instead be started with a valid party code using the
 second argument. `IsValidActivityPartyCode()` checks only the code format; the
-definition must still support party codes. Multiplayer matchmaking itself is
-outside the current activity API.
+definition must still support party codes. Activity-backed matchmaking is not
+part of the initial multiplayer API; use `FindMatch()` for ordinary automatch.
 
 Use `PauseActivity()` and `ResumeActivity()` around interruptions that should
 not count towards active duration. `SetActivityProperty()` adds application
