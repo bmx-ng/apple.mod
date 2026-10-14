@@ -75,6 +75,12 @@ are copied directly into caller-owned storage. `Send()` targets one connected
 player using GameKit's reliable or unreliable mode. Call `Disconnect()` before
 discarding a live match.
 
+For a flexible player range, Game Center may return the match after the
+minimum number of players have connected while it continues filling the
+remaining places. The participant coordinating the pre-game lobby calls
+`FinishMatchmaking()` when the group chooses to start. Only that participant
+should make the call; the other players observe the match becoming complete.
+
 The native event queue is bounded. If an application fails to poll and fills
 it, the next event reports an `Apple.GameKit` queue-overflow error rather than
 allowing memory use to grow without limit.
