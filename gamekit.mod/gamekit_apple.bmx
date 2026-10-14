@@ -317,6 +317,16 @@ Type TGameCenterMatch
 	End Method
 
 	Rem
+	bbdoc: Stops Game Center from adding more players to this match.
+	about: Call this after the minimum number of players have connected and the
+	game's lobby owner has chosen to start. Only one participant should finish
+	matchmaking for a given match.
+	End Rem
+	Method FinishMatchmaking()
+		If _handle > 0 Then bmx_gamekit_match_finish_matchmaking(_handle)
+	End Method
+
+	Rem
 	bbdoc: Copies and removes the next queued match event.
 	returns: True when an event was returned, or False when the queue is empty.
 	about: @dataCapacity may be zero with a Null @data pointer. For a data event,
@@ -1839,6 +1849,7 @@ Extern
 	Function bmx_gamekit_match_expected_player_count:Int(handle:Int)
 	Function bmx_gamekit_match_player_count:Int(handle:Int)
 	Function bmx_gamekit_match_player:Int(handle:Int, playerIndex:Int, gamePlayerId:String Var, teamPlayerId:String Var, alias:String Var, displayName:String Var, underage:Int Var, multiplayerRestricted:Int Var, personalizedCommunicationRestricted:Int Var)
+	Function bmx_gamekit_match_finish_matchmaking(handle:Int)
 	Function bmx_gamekit_match_poll:Int(handle:Int, data:Byte Ptr, dataCapacity:Size_T, kind:EGameCenterMatchEventKind Var, playerIndex:Int Var, dataLength:Size_T Var, errorDomain:String Var, errorCode:Int Var, errorMessage:String Var)
 	Function bmx_gamekit_match_send:Int(handle:Int, playerIndex:Int, mode:EGameCenterMatchSendMode, data:Byte Ptr, length:Size_T, errorDomain:String Var, errorCode:Int Var, errorMessage:String Var)
 	Function bmx_gamekit_match_is_open:Int(handle:Int)

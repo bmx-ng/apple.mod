@@ -857,6 +857,15 @@ int bmx_gamekit_match_player(int handle, int playerIndex,
     return player != nil;
 }
 
+void bmx_gamekit_match_finish_matchmaking(int handle) {
+    DispatchMain(^{
+        BMXGameKitMatch *wrapper = MatchCache()[@(handle)];
+        if (wrapper && wrapper.open) {
+            [GKMatchmaker.sharedMatchmaker finishMatchmakingForMatch:wrapper.match];
+        }
+    });
+}
+
 int bmx_gamekit_match_poll(int handle, void *data, size_t dataCapacity,
                            int *kind, int *playerIndex, size_t *dataLength,
                            BBString **errorDomain, int *errorCode, BBString **errorMessage) {
